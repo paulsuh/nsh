@@ -52,6 +52,7 @@ char *get_hwdaddr(char *ifname);
 void pack_ifaliasreq(struct ifaliasreq *, ip_t *, struct in_addr *, char *);
 void pack_in6aliasreq(struct in6_aliasreq *, ip_t *, struct in6_addr *, char *);
 void ipv6ll_db_store(struct sockaddr_in6 *, struct sockaddr_in6 *, int, char *);
+void printifhwfeatures(int, char *);
 
 static const struct {
 	char *name;
@@ -305,6 +306,12 @@ show_int(int argc, char **argv)
 		 * Display MTU, line rate
 		 */
 		printf(" MTU %u bytes", if_mtu);
+#ifdef SIOCGIFHARDMTU
+		if (ioctl(ifs, SIOCGIFHARDMTU, (caddr_t)&ifr) != -1) {
+			if (ifr.ifr_hardmtu)
+				printf(" (hardmtu %u)", ifr.ifr_hardmtu);
+		}
+#endif
 		if (if_baudrate)
 			printf(", Line Rate %qu %s\n",
 			    MBPS(if_baudrate) ? MBPS(if_baudrate) :
@@ -376,6 +383,7 @@ show_int(int argc, char **argv)
 			bprintf(stdout, flags, ifnetflags);
 			printf("\n");
 		}
+		printifhwfeatures(ifs, ifname);
 		if (br) {
 			if ((tmp = bridge_list(ifs, ifname, "    ", tmp_str,
 			    sizeof(tmp_str), SHOW_STPSTATE))) {
@@ -390,6 +398,33 @@ show_int(int argc, char **argv)
 
 	close(ifs);
 	return(0);
+}
+
+/* lifted right from ifconfig.c */
+#define HWFEATURESBITS							\
+	"\024\1CSUM_IPv4\2CSUM_TCPv4\3CSUM_UDPv4"			\
+	"\5VLAN_MTU\6VLAN_HWTAGGING\10CSUM_TCPv6"			\
+	"\11CSUM_UDPv6\20WOL"
+
+/* lifted right from ifconfig.c */
+void
+printifhwfeatures(int ifs, char *ifname)
+{
+	struct ifreq	ifr;
+	struct if_data	ifrdat;
+
+	bzero(&ifrdat, sizeof(ifrdat));
+	ifr.ifr_data = (caddr_t)&ifrdat;
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+
+	if (ioctl(ifs, SIOCGIFDATA, (caddr_t)&ifr) == -1) {
+		printf("%% printifhwfeatures: SIOCGIFDATA: %s\n",
+		    strerror(errno));
+		return;
+	}
+	printf("  Hardware features:\n    ");
+	bprintf(stdout, (u_int)ifrdat.ifi_capabilities, HWFEATURESBITS);
+	putchar('\n');
 }
 
 u_int32_t
@@ -658,15 +693,13 @@ intip(char *ifname, int ifs, int argc, char **argv)
 	}
 
 	if (isprefix(argv[0], "dhcp")) {
-		char table[16];
-		char *args[] = { PKILL, table, "dhclient", ifname, '\0' };
+		char *args[] = { PKILL, "dhclient", ifname, '\0' };
 		char *args_set[] = { DHCLIENT, ifname, '\0' };
 		char leasefile[sizeof(LEASEPREFIX)+1+IFNAMSIZ];
 
 		if (set)
 			cmdargs(DHCLIENT, args_set);
 		else {
-			snprintf(table, sizeof(table), "-T%d", cli_rtable);
 			cmdargs(PKILL, args);
 			snprintf(leasefile, sizeof(leasefile), "%s.%s",
 			    LEASEPREFIX, ifname);
@@ -1119,8 +1152,8 @@ intdhcrelay(char *ifname, int ifs, int argc, char **argv)
 		flag_x("dhcrelay", ifname, DB_X_ENABLE, argv[0]);
 		cmdargs(DHCRELAY, cmd);
 	} else {
-		char table[16], server[24], argue[SIZE_CONF_TEMP];
-		char *killcmd[] = { PKILL, table, "-xf", NULL, '\0' };
+		char server[24], argue[SIZE_CONF_TEMP];
+		char *killcmd[] = { PKILL, "-xf", NULL, '\0' };
 
 		if ((alen = conf_dhcrelay(ifname, server, sizeof(server))) < 1) {
 			if (alen == 0)
@@ -1138,8 +1171,6 @@ intdhcrelay(char *ifname, int ifs, int argc, char **argv)
 
 		flag_x("dhcrelay", ifname, DB_X_REMOVE, NULL);
 
-		snprintf(table, sizeof(table), "-T%d", cli_rtable);
-
 		/* setup argument list as one argument for pkill -xf */
 		snprintf(argue, sizeof(argue), "%s %s %s %s", cmd[0], cmd[1], cmd[2], server);
 		killcmd[3] = argue;
@@ -1153,7 +1184,8 @@ int
 intmetric(char *ifname, int ifs, int argc, char **argv)
 {
 	struct ifreq ifr;
-	int set;
+	int set, max, theioctl;
+	char *type;
 	const char *errmsg = NULL;
 
 	if (NO_ARG(argv[0])) {
@@ -1163,28 +1195,41 @@ intmetric(char *ifname, int ifs, int argc, char **argv)
 	} else
 		set = 1;
 
+	if (isprefix(argv[0], "metric")) {
+		type = "metric";
+		max = INT_MAX;
+		theioctl = SIOCSIFMETRIC;
+	} else if (isprefix(argv[0], "priority")) {
+		type = "priority";
+		max = 15;
+		theioctl = SIOCSIFPRIORITY;
+	} else {
+		printf("%% intmetric internal failure\n");
+		return(0);
+	}
+
 	argc--;
 	argv++;
 
 	if ((!set && argc > 1) || (set && argc != 1)) {
-		printf("%% metric <metric>\n");
-		printf("%% no metric [metric]\n");
+		printf("%% %s <%s>\n", type, type);
+		printf("%% no %s [%s]\n", type, type);
 		return(0);
 	}
 
 	if (set)
-		ifr.ifr_metric = strtonum(argv[0], 0, ULONG_MAX, &errmsg);
+		ifr.ifr_metric = strtonum(argv[0], 0, max, &errmsg);
 	else
 		ifr.ifr_metric = 0;
 
 	if (errmsg) {
-		printf("%% Invalid metric %s: %s\n", argv[0], errmsg);
+		printf("%% Invalid %s %s: %s\n", type, argv[0], errmsg);
 		return(0);
 	}
 
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-	if (ioctl(ifs, SIOCSIFMETRIC, (caddr_t)&ifr) < 0)
-		printf("%% intmetric: SIOCSIFMETRIC: %s\n", strerror(errno));
+	if (ioctl(ifs, theioctl, (caddr_t)&ifr) < 0)
+		printf("%% intmetric: SIOCSIF%s: %s\n", type, strerror(errno));
 
 	return(0);
 }
@@ -1724,6 +1769,86 @@ intlladdr(char *ifname, int ifs, int argc, char **argv)
 		return(1);
 	}
 
+	return(0);
+}
+
+int
+intrtd(char *ifname, int ifs, int argc, char **argv)
+{
+	StringList *dbreturn;
+	char *cmdpath, *cmdname;
+	int set;
+
+	if (NO_ARG(argv[0])) {
+		argv++;
+		argc--;
+		set = 0;
+	} else
+		set = 1;
+
+	if (isprefix(argv[0], "rtsol")) {
+		cmdname = "rtsol";
+		cmdpath = RTSOL;
+	} else if (isprefix(argv[0], "rtadvd")) {
+		cmdname = "rtadvd";
+		cmdpath = RTADVD;
+	} else {
+		printf("%% intrtd: Internal error\n");
+		return 0;
+	}
+
+	if (argc > 1) {
+		printf ("%% %s\n", cmdname);
+		printf ("%% no %s\n", cmdname);
+		return(0);
+	}
+
+	dbreturn = sl_init();
+	if (db_select_flag_x_ctl(dbreturn, cmdname, ifname) < 0) {
+		printf("%% database failure select flag x ctl\n");
+		sl_free(dbreturn, 1);
+		return(1);
+	}
+	if (dbreturn->sl_cur > 0) {
+		/* already found in db for ifname */
+		if (!set) {
+			if (db_delete_flag_x_ctl(cmdname, ifname) < 0)
+				printf("%% database delete failure\n");
+		} else {
+			printf("%% %s already running\n", cmdname);
+		}
+		if (!set && strcmp(cmdname, "rtsol") == 0) {
+			char *args[] = { PKILL, cmdpath, ifname, '\0' };
+
+			cmdargs(PKILL, args);
+		} else if (!set && strcmp(cmdname, "rtadvd") == 0) {
+			char *args[] = { PKILL, cmdpath, "-c", "/var/run/rtadvd.0", ifname, '\0' };
+
+			cmdargs(PKILL, args);
+		}
+	} else {
+		/* not found in db for ifname */
+		if (set) {
+			if(db_insert_flag_x(cmdname, ifname, 0, DB_X_ENABLE,
+			    NULL) < 0) {
+				printf("%% database insert failure\n");
+				sl_free(dbreturn, 1);
+				return(1);
+			}
+		} else {
+			printf("%% %s not running\n", cmdname);
+		}
+		if (set && strcmp(cmdname, "rtsol") == 0) {
+			char *args[] = { cmdpath, ifname, '\0' };
+
+			cmdargs(cmdpath, args);
+		} else if (set && strcmp(cmdname, "rtadvd") == 0) {
+			char *args[] = { cmdpath, "-c", "/var/run/rtadvd.0", ifname, '\0' };
+
+			cmdargs(cmdpath, args);
+		}
+	}
+	sl_free(dbreturn, 1);
 	return(0);
 }
 

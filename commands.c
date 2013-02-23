@@ -68,12 +68,13 @@
 
 char prompt[128];
 
-char line[256];
-char saveline[256];
+char line[1024];
+char saveline[1024];
 int  margc;
 char hname[HSIZE];
 static char hbuf[MAXHOSTNAMELEN];	/* host name */
 static char ifname[IFNAMSIZ];		/* interface name */
+struct intlist *whichlist;
 
 #define NARGS  sizeof(line)/2		/* max arguments in char line[] */
 char	*margv[NARGS];			/* argv storage */
@@ -279,6 +280,7 @@ Menu ip6tab[] = {
 	{ "maxifprefixes", "Max if IPv6 Prefixes",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxifdefrouters", "Max if IPv6 Def Routers",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxdynroutes", "Max IPv6 Dyn Routes",	CMPL0 0, 0, 0, 0, ipsysctl },
+	{ "accept-rtadv", "Accept Router Advertisements", CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
 	{ 0, 0, 0, 0, 0, 0, 0, 0 }
 };
@@ -481,93 +483,106 @@ flush_help(void)
 
 struct intlist Intlist[] = {
 /* Interface mode commands */
-	{ "ip",		"IP address and other parameters",	CMPL0 0, 0, intip,  0 },
-	{ "alias",	"Additional IP addresses and other parameters", CMPL0 0, 0, intip, 0 },
-	{ "description", "Interface description",		CMPL0 0, 0, intdesc, 0 },
-	{ "group",	"Interface group",			CMPL0 0, 0, intgroup, 0 },
-	{ "rdomain",	"Interface routing domain",		CMPL0 0, 0, intrdomain, 0 },
-	{ "rtlabel",	"Interface route labels",		CMPL0 0, 0, intrtlabel, 0 },
-	{ "mtu",	"Set Maximum Transmission Unit",	CMPL0 0, 0, intmtu, 0 },
-	{ "metric",	"Set routing metric",			CMPL0 0, 0, intmetric, 0 },
-	{ "link",	"Set link level options",		CMPL0 0, 0, intlink, 2 },
-	{ "arp",	"Set Address Resolution Protocol",	CMPL0 0, 0, intflags, 0 },
-	{ "label",	"Set MPLS Label",			CMPL0 0, 0, intlabel, 0 },
-	{ "lladdr",	"Set Link Level (MAC) Address",		CMPL0 0, 0, intlladdr, 0 },
-	{ "nwid",	"802.11 network ID",			CMPL0 0, 0, intnwid, 0 },
-	{ "nwkey",	"802.11 network key",			CMPL0 0, 0, intnwkey, 0 },
-	{ "powersave",	"802.11 powersaving mode",		CMPL0 0, 0, intpowersave, 0 },
-	{ "txpower",	"802.11 transmit power",		CMPL0 0, 0, inttxpower, 0 },
-	{ "bssid",	"802.11 bss id",			CMPL0 0, 0, intbssid, 0 },
-	{ "media",	"Media type",				CMPL0 0, 0, intmedia, 0 },
-	{ "mediaopt",	"Media options",			CMPL0 0, 0, intmediaopt, 0 },
+	{ "ip",		"IP address and other parameters",	CMPL0 0, 0, intip },
+	{ "alias",	"Additional IP addresses and other parameters", CMPL0 0, 0, intip },
+	{ "description", "Interface description",		CMPL0 0, 0, intdesc },
+	{ "group",	"Interface group",			CMPL0 0, 0, intgroup },
+	{ "rdomain",	"Interface routing domain",		CMPL0 0, 0, intrdomain },
+	{ "rtlabel",	"Interface route labels",		CMPL0 0, 0, intrtlabel },
+	{ "priority",	"Interface priority",			CMPL0 0, 0, intmetric },
+	{ "mtu",	"Set Maximum Transmission Unit",	CMPL0 0, 0, intmtu },
+	{ "metric",	"Set routing metric",			CMPL0 0, 0, intmetric },
+	{ "link",	"Set link level options",		CMPL0 0, 0, intlink },
+	{ "arp",	"Set Address Resolution Protocol",	CMPL0 0, 0, intflags },
+	{ "label",	"Set MPLS Label",			CMPL0 0, 0, intlabel },
+	{ "lladdr",	"Set Link Level (MAC) Address",		CMPL0 0, 0, intlladdr },
+	{ "nwid",	"802.11 network ID",			CMPL0 0, 0, intnwid },
+	{ "nwkey",	"802.11 network key",			CMPL0 0, 0, intnwkey },
+	{ "powersave",	"802.11 powersaving mode",		CMPL0 0, 0, intpowersave },
+	{ "txpower",	"802.11 transmit power",		CMPL0 0, 0, inttxpower },
+	{ "bssid",	"802.11 bss id",			CMPL0 0, 0, intbssid },
+	{ "media",	"Media type",				CMPL0 0, 0, intmedia },
+	{ "mediaopt",	"Media options",			CMPL0 0, 0, intmediaopt },
 #ifdef INET6
-	{ "vltime",	"IPv6 valid lifetime",			CMPL0 0, 0, intvltime, 0 },
-	{ "pltime",	"IPv6 preferred lifetime",		CMPL0 0, 0, intpltime, 0 },
-	{ "anycast",	"IPv6 anycast address bit",		CMPL0 0, 0, intanycast, 0 },
-	{ "tentative",	"IPv6 tentative address bit",		CMPL0 0, 0, inttentative, 0 },
-	{ "eui64",	"IPv6 automatic interface index",	CMPL0 0, 0, inteui64, 0 },
+	{ "vltime",	"IPv6 valid lifetime",			CMPL0 0, 0, intvltime },
+	{ "pltime",	"IPv6 preferred lifetime",		CMPL0 0, 0, intpltime },
+	{ "anycast",	"IPv6 anycast address bit",		CMPL0 0, 0, intanycast },
+	{ "tentative",	"IPv6 tentative address bit",		CMPL0 0, 0, inttentative },
+	{ "eui64",	"IPv6 automatic interface index",	CMPL0 0, 0, inteui64 },
 #endif
-	{ "tunnel",	"Source/destination for GIF/GRE tunnel",CMPL0 0, 0, inttunnel, 0 },
-	{ "keepalive",	"GRE tunnel keepalive",			CMPL0 0, 0, intkeepalive, 0 },
-	{ "syncdev",	"PFsync control message interface",	CMPL(i) 0, 0, intsyncdev, 0 },
-	{ "syncpeer",	"PFsync peer address",			CMPL0 0, 0, intsyncpeer, 0},
-	{ "maxupd", 	"PFsync max updates, defer first packet", CMPL0 0, 0, intmaxupd, 0 },
-	{ "vhid",	"CARP virtual host ID",			CMPL0 0, 0, intcarp, 0 },
-	{ "advbase",	"CARP advertisement interval",		CMPL0 0, 0, intcarp, 0 },
-	{ "advskew",	"CARP advertisement skew",		CMPL0 0, 0, intcarp, 0 },
-	{ "cpass",	"CARP passphrase",			CMPL0 0, 0, intcpass, 0 },
-	{ "carpdev",	"CARP device",				CMPL(i) 0, 0, intcdev, 0 },
-	{ "carpnode",	"CARP additional vhid/advskew",		CMPL0 0, 0, intcnode, 0 },
-	{ "carppeer",	"CARP peer",				CMPL0 0, 0, intcarp, 0 },
-	{ "balancing",	"CARP balancing mode",			CMPL0 0, 0, intcarp, 0 },
-	{ "pflow",	"pflow data export",			CMPL0 0, 0, intpflow, 0 },
-	{ "vlan",	"802.1Q vlan tag and parent",		CMPL0 0, 0, intvlan, 0 },
-	{ "timeslots",	"TDM timeslots",			CMPL0 0, 0, inttimeslot, 0},
-	{ "debug",	"Driver dependent debugging",		CMPL0 0, 0, intflags, 0 },
-	{ "dhcrelay",	"DHCP Relay Agent",			CMPL0 0, 0, intdhcrelay, 0 },
-	{ "shutdown",	"Shutdown interface",			CMPL0 0, 0, intflags, 2 },
-	{ "wol",	"Wake On LAN",				CMPL0 0, 0, intxflags, 2 },
-	{ "mpls",	"MPLS",					CMPL0 0, 0, intxflags, 2 },
-	{ "inet6",	"IPv6",					CMPL0 0, 0, intxflags, 2 },
-	{ "autoconfprivacy", "IPv6 Autoconfigurable address",	CMPL0 0, 0, intxflags, 2 },
+	{ "tunnel",	"Source/destination for GIF/GRE tunnel",CMPL0 0, 0, inttunnel },
+	{ "keepalive",	"GRE tunnel keepalive",			CMPL0 0, 0, intkeepalive },
+	{ "syncdev",	"PFsync control message interface",	CMPL(i) 0, 0, intsyncdev },
+	{ "syncpeer",	"PFsync peer address",			CMPL0 0, 0, intsyncpeer },
+	{ "maxupd", 	"PFsync max updates, defer first packet", CMPL0 0, 0, intmaxupd },
+	{ "vhid",	"CARP virtual host ID",			CMPL0 0, 0, intcarp },
+	{ "advbase",	"CARP advertisement interval",		CMPL0 0, 0, intcarp },
+	{ "advskew",	"CARP advertisement skew",		CMPL0 0, 0, intcarp },
+	{ "carppass",	"CARP passphrase",			CMPL0 0, 0, intcpass },
+	{ "carpdev",	"CARP device",				CMPL(i) 0, 0, intcdev },
+	{ "carpnode",	"CARP additional vhid/advskew",		CMPL0 0, 0, intcnode },
+	{ "carppeer",	"CARP peer",				CMPL0 0, 0, intcarp },
+	{ "balancing",	"CARP balancing mode",			CMPL0 0, 0, intcarp },
+	{ "pflow",	"pflow data export",			CMPL0 0, 0, intpflow },
+	{ "vlan",	"802.1Q vlan tag and parent",		CMPL0 0, 0, intvlan },
+	{ "timeslots",	"TDM timeslots",			CMPL0 0, 0, inttimeslot },
+	{ "debug",	"Driver dependent debugging",		CMPL0 0, 0, intflags },
+	{ "dhcrelay",	"DHCP Relay Agent",			CMPL0 0, 0, intdhcrelay },
+	{ "wol",	"Wake On LAN",				CMPL0 0, 0, intxflags },
+	{ "mpls",	"MPLS",					CMPL0 0, 0, intxflags },
+	{ "inet6",	"IPv6",					CMPL0 0, 0, intxflags },
+	{ "rtsol",	"IPv6 router solicitation request",	CMPL0 0, 0, intrtd },
+	{ "rtadvd",	"IPv6 router advertisement service",	CMPL0 0, 0, intrtd },
+	{ "autoconfprivacy", "IPv6 Autoconfigurable address",	CMPL0 0, 0, intxflags },
+        { "trunkport",  "Add child interface(s) to trunk",      CMPL0 0, 0, inttrunkport },
+        { "trunkproto", "Define trunkproto",                    CMPL0 0, 0, inttrunkproto },
+	{ "shutdown",   "Shutdown interface",			CMPL0 0, 0, intflags },
+        { "?",		"Options",				CMPL0 0, 0, int_help },
+        { "help",	0,					CMPL0 0, 0, int_help },
+
+	{ 0, 0, 0, 0, 0 }
+};
+
+struct intlist Bridgelist[] = {
 /* Bridge mode commands */
-	{ "member",	"Bridge member(s)",			CMPL(i) 0, 0, brport, 1 },
-	{ "span",	"Bridge spanning port(s)",		CMPL(i) 0, 0, brport, 1 },
-	{ "blocknonip",	"Block non-IP traffic forwarding on member(s)",		CMPL0 0, 0, brport, 1 },
-	{ "discover",	"Mark member(s) as discovery port(s)",	CMPL0 0, 0, brport, 1 },
-	{ "learning",	"Mark member(s) as learning port(s)",	CMPL0 0, 0, brport, 1 },
-	{ "stp",	"Enable 802.1D spanning tree protocol on member(s)",	CMPL0 0, 0, brport, 1 },
-	{ "maxaddr",	"Maximum address cache size",		CMPL0 0, 0, brval, 1 },
-	{ "timeout",	"Address cache timeout",		CMPL0 0, 0, brval, 1 },
-	{ "maxage",	"Time for 802.1D configuration to remain valid",	CMPL0 0, 0, brval, 1 },
-	{ "fwddelay",	"Time before bridge begins forwarding packets",		CMPL0 0, 0, brval, 1 },
-	{ "hellotime",	"802.1D configuration packet broadcast interval",	CMPL0 0, 0, brval, 1 },
-	{ "priority",	"Spanning priority for all members on an 802.1D bridge",CMPL0 0, 0, brval, 1 },
-	{ "rule",	"Bridge layer 2 filtering rules",	CMPL0 0, 0, brrule, 1 },
-	{ "static",	"Static bridge address entry",		CMPL0 0, 0, brstatic, 1 },
-	{ "ifpriority",	"Spanning priority of a member on an 802.1D bridge",	CMPL0 0, 0, brpri, 1 },
-	{ "ifcost",	"Spanning tree path cost of a member on 802.1D bridge", CMPL0 0, 0, brpri, 1 },
-	{ "trunkport",  "Add child interface(s) to trunk",	CMPL0 0, 0, inttrunkport, 0 },
-	{ "trunkproto",	"Define trunkproto",		 	CMPL0 0, 0, inttrunkproto, 0 },
+	{ "description", "Bridge description",			CMPL0 0, 0, intdesc },
+	{ "member",	"Bridge member(s)",			CMPL(i) 0, 0, brport },
+	{ "span",	"Bridge spanning port(s)",		CMPL(i) 0, 0, brport },
+	{ "blocknonip",	"Block non-IP traffic forwarding on member(s)",		CMPL0 0, 0, brport },
+	{ "discover",	"Mark member(s) as discovery port(s)",	CMPL0 0, 0, brport },
+	{ "learning",	"Mark member(s) as learning port(s)",	CMPL0 0, 0, brport },
+	{ "stp",	"Enable 802.1D spanning tree protocol on member(s)",	CMPL0 0, 0, brport },
+	{ "maxaddr",	"Maximum address cache size",		CMPL0 0, 0, brval },
+	{ "timeout",	"Address cache timeout",		CMPL0 0, 0, brval },
+	{ "maxage",	"Time for 802.1D configuration to remain valid",	CMPL0 0, 0, brval },
+	{ "fwddelay",	"Time before bridge begins forwarding packets",		CMPL0 0, 0, brval },
+	{ "hellotime",	"802.1D configuration packet broadcast interval",	CMPL0 0, 0, brval },
+	{ "priority",	"Spanning priority for all members on an 802.1D bridge",CMPL0 0, 0, brval },
+	{ "rule",	"Bridge layer 2 filtering rules",	CMPL0 0, 0, brrule },
+	{ "static",	"Static bridge address entry",		CMPL0 0, 0, brstatic },
+	{ "ifpriority",	"Spanning priority of a member on an 802.1D bridge",	CMPL0 0, 0, brpri },
+	{ "ifcost",	"Spanning tree path cost of a member on 802.1D bridge", CMPL0 0, 0, brpri },
+        { "link",	"Set link level options",		CMPL0 0, 0, intlink },
+        { "shutdown",	"Shutdown bridge",			CMPL0 0, 0, intflags },
 
 /* Help commands */
-	{ "?",		"Options",				CMPL0 0, 0, int_help, 2 },
-	{ "help",	0,					CMPL0 0, 0, int_help, 2 },
+	{ "?",		"Options",				CMPL0 0, 0, int_help },
+	{ "help",	0,					CMPL0 0, 0, int_help },
 	{ 0, 0, 0, 0, 0, 0 }
 };
 
 /*
- * a big command input loop for interface mode
+ * command handler for interface and bridge modes
+ *
+ * acts as a loop for human keyboard user, and as a one time command
+ * lookup for rcfile -c or -i usage
+ *
  * if a function returns to interface() with a 1, interface() will break
- * the user back to command() mode.  interface() will always break from
- * mode handler calls.
- * XXX needs to be factored down with other parts of this file into separate
- * functions
+ * the user back to command() mode.
  */
 static int
 interface(int argc, char **argv, char *modhvar)
 {
-	int z = 0;
 	u_int num;
 	int ifs, set = 1;
 	char *tmp;
@@ -611,7 +626,7 @@ interface(int argc, char **argv, char *modhvar)
 	}
 
 	if (!is_valid_ifname(ifname)) {
-		if (set == 0 && !modhvar) {
+		if (set == 0) {
 			printf("%% interface %s not found\n", ifname);
 			close(ifs);
 			return(0);
@@ -627,7 +642,7 @@ interface(int argc, char **argv, char *modhvar)
 		}
 	}
 
-	if (set == 0 && !modhvar) {
+	if (set == 0) {
 		if (ioctl(ifs, SIOCIFDESTROY, &ifr) == -1) {
 			printf("%% unable to remove interface %s: %s\n",
 			    ifname, strerror(errno));
@@ -639,72 +654,88 @@ interface(int argc, char **argv, char *modhvar)
 	}
 
 	if (is_bridge(ifs, ifname)) {
+		/* whichlist also used by help, command completion code */
+		whichlist = Bridgelist;
 		bridge = 1;
-		if (isprefix(modhvar ? modhvar : argv[0], "interface"))
-			printf("%% Using bridge configuration mode"
-			    " for %s\n", ifname);
 	} else {
+		whichlist = Intlist;
 		bridge = 0; 
-		if (isprefix(modhvar ? modhvar : argv[0], "bridge"))
-			printf("%% Using interface configuration mode"
-			    " for %s\n", ifname);
 	}
 
-	for (;;) {
-		if (!modhvar) {
-			/*
-			 * interface cli routines for editing and standard
-			 * mode
-			 */
-			if (!editing) {
-				printf("%s", iprompt());
-				if (fgets(line, sizeof(line), stdin) == NULL) {
-					if (feof(stdin) || ferror(stdin)) {
-						printf("\n");
-						close(ifs);
-						return(0);
-					}
-					break;
-				}
-			} else {
-				const char *buf;
-				cursor_pos = NULL;
+	if (modhvar) {
+		/* direct rcfile -i or -c initialization */
+		char *argp;
 
-				if ((buf = el_gets(eli, &num)) == NULL || num == 0)
-					break;
-				if (buf[--num]  == '\n') {
-					if (num == 0)
-						break;
-				}
-				if (num >= sizeof(line)) {
-					printf("%% Input exceeds permitted length\n");
-					break;
-				}
-				memcpy(line, buf, (size_t)num);
-				line[num] = '\0';
-				history(histi, &ev, H_ENTER, buf);
-			}
-			if (line[0] == 0)
-				break;
-			makeargv();
-			if (margv[0] == 0)
-				break;
-		} else {
-			/*
-			 * a command was supplied directly to interface()
-			 */
-			if (argc - 1 > NARGS)
-				argc = NARGS;
-			for (z = 0; z < argc; z++)
-				margv[z] = argv[z];
-			margc = argc;
-		}
-		if (NO_ARG(margv[0]))
-			i = (struct intlist *) genget(margv[1], (char **)
-			    Intlist, sizeof(struct intlist));
+		if (argc - 1 > NARGS)
+			argc = NARGS;
+		if (argv[0] == 0)
+			return(0);
+		if (NO_ARG(argv[0]))
+			argp = argv[1];
 		else
-			i = (struct intlist *) genget(margv[0], (char **)
-			    Intlist, sizeof(struct intlist));
+			argp = argv[0];
+		i = (struct intlist *) genget(argp, (char **)
+		    whichlist, sizeof(struct intlist));
+		if (Ambiguous(i)) {
+			printf("%% Ambiguous command\n");
+		} else if (i == 0) {
+			printf("%% Invalid command\n");
+		} else {
+			int save_cli_rtable = cli_rtable;
+			cli_rtable = 0;
+
+			((*i->handler) (ifname, ifs, argc, argv));
+
+			cli_rtable = save_cli_rtable;
+		}
+
+		return(0);
+	}
+
+	/* human at the keyboard */
+	for (;;) {
+		char *margp;
+
+		if (!editing) {
+			/* command line editing disabled */
+			printf("%s", iprompt());
+			if (fgets(line, sizeof(line), stdin) == NULL) {
+				if (feof(stdin) || ferror(stdin)) {
+					printf("\n");
+					close(ifs);
+					return(0);
+				}
+				break;
+			}
+		} else {
+			const char *buf;
+			cursor_pos = NULL;
+
+			if ((buf = el_gets(eli, &num)) == NULL || num == 0)
+				break;
+			if (buf[--num]  == '\n') {
+				if (num == 0)
+					break;
+			}
+			if (num >= sizeof(line)) {
+			printf("%% Input exceeds permitted length\n");
+				break;
+			}
+			memcpy(line, buf, (size_t)num);
+			line[num] = '\0';
+			history(histi, &ev, H_ENTER, buf);
+		}
+		if (line[0] == 0)
+			break;
+		makeargv();
+		if (margv[0] == 0)
+			break;
+		if (NO_ARG(margv[0]))
+			margp = margv[1];
+		else
+			margp = margv[0];
+		i = (struct intlist *) genget(margp, (char **)
+		    whichlist, sizeof(struct intlist));
 		if (Ambiguous(i)) {
 			printf("%% Ambiguous command\n");
 		} else if (i == 0) {
@@ -715,17 +746,17 @@ interface(int argc, char **argv, char *modhvar)
 			if (val)
 				printf("%% Invalid command\n");
 		} else {
-			if ((bridge && !i->bridge) ||
-			    (!bridge && (i->bridge == 1))) {
-				printf("%% Invalid command\n");
-			} else if ((*i->handler) (ifname, ifs, margc, margv)) {
+			int save_cli_rtable = cli_rtable;
+			cli_rtable = 0;
+
+			if ((*i->handler) (ifname, ifs, margc, margv)) {
+				cli_rtable = save_cli_rtable;
 				break;
 			}
-		}
-		if (modhvar) {
-			break;
+			cli_rtable = save_cli_rtable;
 		}
 	}
+
 	close(ifs);
 	return(0);
 }
@@ -742,16 +773,12 @@ int_help(void)
 	printf("%% %s configuration commands are:\n\n",
 	    bridge ? "Bridge" : "Interface");
 
-	for (i = Intlist; i->name; i++) {
-		if ((bridge && !i->bridge) || (!bridge && (i->bridge == 1)))
-			continue;
+	for (i = whichlist; i->name; i++) {
 		if (strlen(i->name) > z)
 			z = strlen(i->name);
 	}
 
-	for (i = Intlist; i->name; i++) {
-		if ((bridge && !i->bridge) || (!bridge && (i->bridge == 1)))
-			continue;
+	for (i = whichlist; i->name; i++) {
 		if (i->help)
 			printf("  %-*s  %s\n", z, i->name, i->help);
 	}
@@ -780,8 +807,8 @@ static char
 	relayhelp[] =	"Relay control",
 	ipsechelp[] =	"IPsec IKEv1 control",
 	ikehelp[] =	"IPsec IKEv2 control",
-	dvmrphelp[] = 	"DVMRP control",
 	rtadvhelp[] =	"Router advertisement control",
+	dvmrphelp[] = 	"DVMRP control",
 	sasynchelp[] =	"SA synchronization control",
 	dhcphelp[] =	"DHCP server control",
 	snmphelp[] =	"SNMP server control",
@@ -1472,7 +1499,7 @@ cmdargs(char *cmd, char *arg[])
 
 			char *shellp = cmd;
 
-			if (nsh_setrtable(cli_rtable))
+			if (cli_rtable != 0 && nsh_setrtable(cli_rtable))
 				_exit(0);
 
 			execv(shellp, arg);
