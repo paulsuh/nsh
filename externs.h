@@ -2,8 +2,10 @@
  * nsh externs, prototypes and macros
  */
 
-#define NO_ARG(x) (strcasecmp(x, "no") == 0) /* absolute "no" */
-#define MIN_ARG(x,y) (strncasecmp(x, y, strlen(y)) == 0) /* mabye arg y */
+#define NO_ARG(x)	(strcasecmp(x, "no") == 0) /* absolute "no" */
+#define MIN_ARG(x,y)	(strncasecmp(x, y, strlen(y)) == 0) /* mabye arg y */
+
+#define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0])) /* sys/param.h */
 
 struct rtdump {
 	char *buf;	/* start of routing table */
@@ -12,8 +14,8 @@ struct rtdump {
 
 extern char *__progname;	/* duh */
 extern char *vers;		/* the version of nsh */
-extern char saveline[256];	/* command line */
-extern char line[256];		/* command line for makeargv() */
+extern char saveline[1024];	/* command line */
+extern char line[1024];		/* command line for makeargv() */
 extern int  margc;		/* makeargv() arg count */
 extern char *margv[];		/* makeargv() args */
 extern int verbose;		/* is verbose mode on? */
@@ -162,7 +164,11 @@ struct ctl {
 	char *args[32];
 	void (*handler)();
 	int flag_x;
+	int type;
 };
+#define	T_HANDLER	1
+#define T_HANDLER_FILL1	2
+#define	T_EXEC		3
 struct daemons {
         char *name;
 	char *propername;
@@ -273,6 +279,8 @@ struct ghs {
 
 extern Command cmdtab[];
 extern struct intlist Intlist[];
+extern struct intlist Bridgelist[];
+extern struct intlist *whichlist;
 
 /* ieee80211.c */
 #define NWID 0
@@ -336,6 +344,8 @@ int parse_ipv6(char *, struct in6_addr *);
 /* if.c */
 #define DHCLIENT	"/sbin/dhclient"
 #define DHCRELAY	"/usr/sbin/dhcrelay"
+#define RTSOL		"/sbin/rtsol"
+#define RTADVD		"/usr/sbin/rtadvd"
 #define IFDATA_MTU 1		/* request for if_data.ifi_mtu */
 #define IFDATA_BAUDRATE 2	/* request for if_data.ifi_baudrate */
 #define MBPS(bps) (bps / 1000 / 1000)
@@ -359,6 +369,7 @@ int intlabel(char *, int, int, char **);
 int intrdomain(char *, int, int, char **);
 int intdhcrelay(char *, int, int, char **);
 int intmetric(char *, int, int, char **);
+int intrtd(char *, int, int, char **);
 int intvlan(char *, int, int, char **);
 int intflags(char *, int, int, char **);
 int intxflags(char *, int, int, char **);
