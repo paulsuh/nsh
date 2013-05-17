@@ -211,15 +211,9 @@ struct ctl ctl_ldp[] = {
 char *ctl_ipsec_test[] = { IPSECCTL, "-nf", REQTEMP, '\0' };
 struct ctl ctl_ipsec[] = {
 	{ "enable",     "enable service",
-<<<<<<< HEAD
-	    { ISAKMPD, "-KSa", NULL }, NULL, DB_X_ENABLE, T_EXEC },
-	{ "disable",    "disable service",
-	    { PKILL, table, "isakmpd", NULL }, NULL, DB_X_DISABLE, T_EXEC },
-=======
-	    { ISAKMPD, "-KS", NULL }, NULL, DB_X_ENABLE },
+	    { ISAKMPD, "-K", NULL }, NULL, DB_X_ENABLE },
 	{ "disable",    "disable service",                   
 	    { PKILL, table, "isakmpd", NULL }, NULL, DB_X_DISABLE },
->>>>>>> Fix isakmpd flags
 	{ "edit",       "edit configuration",   
 	    { "ipsec", (char *)ctl_ipsec_test, NULL }, call_editor, 0,
 	    T_HANDLER_FILL1 },
