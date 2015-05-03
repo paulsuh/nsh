@@ -105,7 +105,7 @@ show_int(int argc, char **argv)
 	short tmp;
 	int ifs, br, flags, days, hours, mins, pntd;
 	int ippntd = 0;
-	int buf3;
+	int physrt, physttl;
 	time_t c;
 	char *type, *lladdr, *ifname = NULL;
 
@@ -290,11 +290,13 @@ show_int(int argc, char **argv)
 
 	if (!br) {
 		if (phys_status(ifs, ifname, tmp_str, tmp_str2,
-		    sizeof(tmp_str), sizeof(tmp_str2), &buf3) > 0) {
+		    sizeof(tmp_str), sizeof(tmp_str2)) > 0) {
 			printf("  Tunnel source %s destination %s",
 			    tmp_str, tmp_str2);
-			if (&buf3 != NULL)
-				printf(" destination rdomain %i", buf3);
+			if (((physrt = conf_physrtable(ifs, ifname)) != 0))
+				printf(" destination rdomain %i", physrt);
+			if (((physttl = conf_physttl(ifs, ifname)) != 0))
+				printf(" ttl %i", physttl);
 			printf("\n");
 		}
 		carp_state(ifs, ifname);
@@ -596,7 +598,7 @@ set_ifflags(char *ifname, int ifs, int flags)
 	ifr.ifr_flags = flags;
 
 	if (ioctl(ifs, SIOCSIFFLAGS, (caddr_t)&ifr) < 0) {
-		printf("%% get_ifflags: SIOCSIFFLAGS: %s\n", strerror(errno));
+		printf("%% set_ifflags: SIOCSIFFLAGS: %s\n", strerror(errno));
 	}
 
         return(0);
@@ -628,9 +630,59 @@ set_ifxflags(char *ifname, int ifs, int flags)
 	ifr.ifr_flags = flags;
 
 	if (ioctl(ifs, SIOCSIFXFLAGS, (caddr_t)&ifr) < 0) {
-		printf("%% get_ifxflags: SIOCSIFXFLAGS: %s\n", strerror(errno));
+		printf("%% set_ifxflags: SIOCSIFXFLAGS: %s\n", strerror(errno));
 	}
 
+	return(0);
+}
+
+/* addaf, removeaf heavily derived from sbin/ifconfig/ifconfig.c */
+int
+addaf(char *ifname, int af, int ifs)
+{
+#ifdef IFXF_NOINET6	/* Pre 5.7 */
+	if (af == AF_INET6) {
+		set_ifxflags(ifname, ifs, -IFXF_NOINET6);
+	} else {
+		printf("%% addaf not implemented for AF %d\n", af);
+		return(1);
+	}
+#else			/* 5.7 */
+	struct if_afreq	ifar;
+
+	strlcpy(ifar.ifar_name, ifname, sizeof(ifar.ifar_name));
+	ifar.ifar_af = af;
+	if (ioctl(ifs, SIOCIFAFATTACH, (caddr_t)&ifar) < 0) {
+		printf("%% addaf: SIOCIFAFATTACH: %s\n",
+		    strerror(errno));
+		return(1);
+	}
+#endif
+	return(0);
+}
+
+int
+removeaf(char *ifname, int af, int ifs)
+{
+#ifdef IFXF_NOINET6	/* Pre 5.7 */
+	if (af == AF_INET6) {
+		set_ifxflags(ifname, ifs, IFXF_NOINET6);
+		set_ifxflags(ifname, ifs, -IFXF_AUTOCONF6);
+	} else {
+		printf("%% removeaf not implemented for AF %d\n", af);
+		return(1);
+	}
+#else			/* 5.7 */
+	struct if_afreq	ifar;
+
+	strlcpy(ifar.ifar_name, ifname, sizeof(ifar.ifar_name));
+	ifar.ifar_af = af;
+	if (ioctl(ifs, SIOCIFAFDETACH, (caddr_t)&ifar) < 0) {
+		printf("%% removeaf: SIOCIFAFDETACH: %s\n",
+		    strerror(errno));
+		return(1);
+	}
+#endif
 	return(0);
 }
 
@@ -740,7 +792,7 @@ intip(char *ifname, int ifs, int argc, char **argv)
 		else if (ip.family == AF_INET6)
 			ip.bitlen = 128;
 	}
-	
+
 	switch(ip.family) {
 	case AF_INET:
 		memset(&in4dest, 0, sizeof(in4dest));
@@ -769,6 +821,8 @@ intip(char *ifname, int ifs, int argc, char **argv)
 			printf("%% socket failed: %s\n", strerror(errno));
 			return(0);
 		}
+		/* turn on inet6 */
+		addaf(ifname, AF_INET6, ifs);
 		/* do it */
 		if (ioctl(s, set ? SIOCAIFADDR_IN6 : SIOCDIFADDR_IN6, &ip6req)
 		    < 0) {
@@ -1190,7 +1244,8 @@ int
 intmetric(char *ifname, int ifs, int argc, char **argv)
 {
 	struct ifreq ifr;
-	int set, max, theioctl;
+	int set, max;
+	unsigned long theioctl;
 	char *type;
 	const char *errmsg = NULL;
 
@@ -1223,10 +1278,18 @@ intmetric(char *ifname, int ifs, int argc, char **argv)
 		return(0);
 	}
 
-	if (set)
-		ifr.ifr_metric = strtonum(argv[0], 0, max, &errmsg);
-	else
+	if (set) {
+		int num;
+
+		num = strtonum(argv[0], 0, max, &errmsg);
+		if (errmsg) {
+			printf("%% Invalid %s %s: %s\n", type, argv[0], errmsg);
+			return(0);
+		}
+		ifr.ifr_metric = num;
+	} else {
 		ifr.ifr_metric = 0;
+	}
 
 	if (errmsg) {
 		printf("%% Invalid %s %s: %s\n", type, argv[0], errmsg);
@@ -1475,6 +1538,34 @@ intflags(char *ifname, int ifs, int argc, char **argv)
 }
 
 int
+intaf(char *ifname, int ifs, int argc, char **argv)
+{
+	int set;
+
+	if (NO_ARG(argv[0])) {
+		set = 0;
+		argv++;
+		argc--;
+	} else
+		set = 1;
+
+	if (argc > 1) {
+		printf("%% Invalid argument\n");
+		return(1);
+	}
+
+	if (isprefix(argv[0], "inet6")) {
+		if (set)
+			addaf(ifname, AF_INET6, ifs);
+		else
+			removeaf(ifname, AF_INET6, ifs);
+	} else {
+		printf("%% intaf: prefix internal error\n");
+	}
+	return(0);
+}
+
+int
 intxflags(char *ifname, int ifs, int argc, char **argv)
 {
 	int set, value, flags;
@@ -1495,8 +1586,6 @@ intxflags(char *ifname, int ifs, int argc, char **argv)
 #endif
 	} else if (isprefix(argv[0], "mpls")) {
 		value = IFXF_MPLS;
-	} else if (isprefix(argv[0], "inet6")) {
-		value = -IFXF_NOINET6;
 	} else if (isprefix(argv[0], "wol")) {
 		value = IFXF_WOL;
 	} else {
@@ -1793,6 +1882,7 @@ intrtd(char *ifname, int ifs, int argc, char **argv)
 		set = 1;
 
 	if (isprefix(argv[0], "rtsol")) {
+		/* XXX this has been replaced with IFXF_AUTOCONF6 */
 		cmdname = "rtsol";
 		cmdpath = RTSOL;
 	} else if (isprefix(argv[0], "rtadvd")) {
