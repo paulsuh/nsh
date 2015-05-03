@@ -513,7 +513,8 @@ struct intlist Intlist[] = {
 	{ "tentative",	"IPv6 tentative address bit",		CMPL0 0, 0, inttentative },
 	{ "eui64",	"IPv6 automatic interface index",	CMPL0 0, 0, inteui64 },
 #endif
-	{ "tunnel",	"Source/destination for GIF/GRE tunnel",CMPL0 0, 0, inttunnel },
+	{ "tunnel",	"VXLAN/GIF/GRE Tunnel parameters",	CMPL0 0, 0, inttunnel },
+	{ "vnetid",	"VXLAN VNETID",				CMPL0 0, 0, intvnetid },
 	{ "keepalive",	"GRE tunnel keepalive",			CMPL0 0, 0, intkeepalive },
 	{ "syncdev",	"PFsync control message interface",	CMPL(i) 0, 0, intsyncdev },
 	{ "syncpeer",	"PFsync peer address",			CMPL0 0, 0, intsyncpeer },
@@ -533,7 +534,7 @@ struct intlist Intlist[] = {
 	{ "dhcrelay",	"DHCP Relay Agent",			CMPL0 0, 0, intdhcrelay },
 	{ "wol",	"Wake On LAN",				CMPL0 0, 0, intxflags },
 	{ "mpls",	"MPLS",					CMPL0 0, 0, intxflags },
-	{ "inet6",	"IPv6",					CMPL0 0, 0, intxflags },
+	{ "inet6",	"IPv6",					CMPL0 0, 0, intaf },
 	{ "rtsol",	"IPv6 router solicitation request",	CMPL0 0, 0, intrtd },
 	{ "rtadvd",	"IPv6 router advertisement service",	CMPL0 0, 0, intrtd },
 	{ "autoconfprivacy", "IPv6 Autoconfigurable address",	CMPL0 0, 0, intxflags },
@@ -1713,8 +1714,8 @@ cmdrc(char rcname[FILENAME_MAX])
 			printf("\n");
 			continue;
 		}
-		if (line[0] != ' ' || (line[0] == ' ' && savec
-		    && savec->modh == 2)) {
+		if (line[0] != ' ' || (line[0] == ' ' && line[1] != ' '
+		    && savec && savec->modh == 2)) {
 			/*
 			 * command was not indented, or indented for a mode 2
 			 * handler. process normally.
@@ -1741,7 +1742,7 @@ cmdrc(char rcname[FILENAME_MAX])
 					 */
 					if (margv[1]) {
 						strlcpy(hname, c->name,
-						    HSIZE);
+							    HSIZE);
 						strlcpy(modhvar, margv[1],
 						    sizeof(modhvar));
 					} else {
@@ -2008,7 +2009,7 @@ pr_arp(int argc, char **argv)
 	switch(argc) {
 	case 2:
 		/* show arp table */
-		p_rttables(AF_INET, 0, RTF_LLINFO);
+		arpdump();
 		break;
 	case 3:
 		/* specific address */

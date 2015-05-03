@@ -88,11 +88,10 @@ char *any_ntoa(const struct sockaddr *);
 
 /* routesys.c */
 #ifdef _NET_ROUTE_H_
-extern struct m_rtmsg m_rtmsg;
-struct m_rtmsg {
+struct {
 	struct	rt_msghdr m_rtm;
 	char	m_space[512];
-};
+} m_rtmsg;
 #endif
 #ifdef _WANT_SO_
 union   sockunion {
@@ -351,6 +350,7 @@ void conf_sysctls(FILE *);
 #define ASSUME_NETMASK 1
 int route(int, char**);
 void show_route(char *, int);
+int is_ip_addr(char *);
 #ifdef _IP_T_
 void parse_ip_pfx(char *, int, ip_t *);
 int ip_route(ip_t *, ip_t *, u_short, int, int);
@@ -391,6 +391,7 @@ int intrtd(char *, int, int, char **);
 int intvlan(char *, int, int, char **);
 int intflags(char *, int, int, char **);
 int intxflags(char *, int, int, char **);
+int intaf(char *, int, int, char **);
 int intlink(char *, int, int, char **);
 int intnwid(char *, int, int, char **);
 int intpowersave(char *, int, int, char **);
@@ -399,6 +400,8 @@ int intpflow(char *, int, int, char **);
 int intlladdr(char *, int, int, char **);
 int intgroup(char *, int, int, char **);
 int intrtlabel(char *, int, int, char **);
+int addaf(char *, int, int);
+int removeaf(char *, int, int);
 char *get_hwdaddr(char *);
 
 /* main.c */
@@ -430,12 +433,16 @@ int flush_bridgerule(char *, char*);
 
 /* tunnel.c */
 int inttunnel(char *, int, int, char **);
+int intvnetid(char *, int, int, char **);
+int conf_physrtable(int, char *);
+int conf_physttl(int, char *);
+int conf_vnetid(int, char *);
 
 /* media.c */
 #define DEFAULT_MEDIA_TYPE	"autoselect"
 void media_status(int, char *, char *);
 void media_supported(int, char *, char *, char *);
-int phys_status(int, char *, char *, char *, int, int, int *);
+int phys_status(int, char *, char *, char *, int, int);
 int intmedia(char *, int, int, char **);
 int intmediaopt(char *, int, int, char **);
 int conf_media_status(FILE *, int, char *);
@@ -482,6 +489,9 @@ int timeslot_status(int, char *, char *, int);
 /* arp.c */
 int arpget(const char *);
 int arpset(int, char **);
+void arpdump(void);
+void conf_arp(FILE *, char *);
+char *sec2str(time_t);
 
 /* more.c */
 int more(char *);

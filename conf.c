@@ -174,7 +174,7 @@ conf(FILE *output)
 	/*
 	 * print static arp and route entries in configuration file format
 	 */
-	conf_routes(output, "arp ", AF_LINK, RTF_STATIC, 0);
+	conf_arp(output, "arp ");
 	conf_routes(output, "route ", AF_INET, RTF_STATIC, 0);
 	conf_routes(output, "route ", AF_INET6, RTF_STATIC, 0);
 
@@ -273,7 +273,7 @@ void conf_rtables_rtable(FILE *output, int rtableid)
 	 * rdomain is created by specifing one on an interface prior
 	 * to this point. An rdomain creates a new corresponding rtable)
 	 */
-	conf_routes(output, " arp ", AF_LINK, RTF_STATIC, rtableid);
+	conf_arp(output, " arp ");
 	conf_routes(output, " route ", AF_INET, RTF_STATIC, rtableid);
 	conf_routes(output, " route ", AF_INET6, RTF_STATIC, rtableid);
 
@@ -675,8 +675,10 @@ void conf_ifxflags(FILE *output, int ifs, char *ifname)
  		/* set mpls mode for eth interfaces */
 		if (ifr.ifr_flags & IFXF_MPLS)
 			fprintf(output, " mpls\n");
+#ifdef IFXF_NOINET6		/* Pre 5.7 */
 		if (ifr.ifr_flags & IFXF_NOINET6)
 			fprintf(output, " no inet6\n");
+#endif
 #ifdef IFXF_INET6_PRIVACY
 		if (ifr.ifr_flags & IFXF_INET6_PRIVACY)
 			fprintf(output, " autoconfprivacy\n");
@@ -737,20 +739,30 @@ void conf_keepalive(FILE *output, int ifs, char *ifname)
 void conf_ifmetrics(FILE *output, int ifs, struct if_data if_data,
     char *ifname)
 {
+	int vnetid;
+	int dstport;
 	char tmpa[IPSIZ], tmpb[IPSIZ], tmpc[TMPSIZ];
-	int buf;
 	struct ifreq ifrpriority;
 
 	/*
-	 * Various metrics valid for non-bridge interfaces
+	 * Various metrics for non-bridge interfaces
 	 */
-	if (phys_status(ifs, ifname, tmpa, tmpb, IPSIZ, IPSIZ, &buf) > 0) {
-		/* future os may use this for more than tunnel? */
+	if ((dstport=
+	    phys_status(ifs, ifname, tmpa, tmpb, IPSIZ, IPSIZ)) >= 0) {
+		int physrt, physttl;
+
 		fprintf(output, " tunnel %s %s", tmpa, tmpb);
-		if (&buf != NULL && buf > 0)
-			fprintf(output, " rdomain %i", buf);
+		if (dstport > 0)
+			fprintf(output, ":%i", dstport);
+		if (((physrt = conf_physrtable(ifs, ifname)) != 0))
+			fprintf(output, " rdomain %i", physrt);
+		if (((physttl = conf_physttl(ifs, ifname)) != 0))
+			fprintf(output, " ttl %i", physttl);
 		fprintf(output, "\n");
 	}
+
+	if (((vnetid = conf_vnetid(ifs, ifname)) != 0))
+			fprintf(output, " vnetid %i\n", vnetid);
 
 	/*
 	 * print interface mtu, metric
@@ -758,12 +770,13 @@ void conf_ifmetrics(FILE *output, int ifs, struct if_data if_data,
 	 * ignore interfaces named "pfsync" since their mtu
 	 * is dynamic and controlled by the kernel
 	 */
-	if (!MIN_ARG(ifname, "pfsync") && (if_mtu != default_mtu(ifname) &&
-	    default_mtu(ifname) != MTU_IGNORE) && if_mtu != 0)
-		fprintf(output, " mtu %u\n", if_mtu);
+	if (!MIN_ARG(ifname, "pfsync") &&
+	    (if_data.ifi_mtu != default_mtu(ifname) &&
+	    default_mtu(ifname) != MTU_IGNORE) && if_data.ifi_mtu != 0)
+		fprintf(output, " mtu %u\n", if_data.ifi_mtu);
+	if (if_data.ifi_metric)
+		fprintf(output, " metric %u\n", if_data.ifi_metric);
 
-	if (if_metric)
-		fprintf(output, " metric %u\n", if_metric);
 	strlcpy(ifrpriority.ifr_name, ifname, IFNAMSIZ);
 	if (ioctl(ifs, SIOCGIFPRIORITY, (caddr_t)&ifrpriority) == 0)
 		if(ifrpriority.ifr_metric)
@@ -1002,19 +1015,25 @@ conf_routes(FILE *output, char *delim, int af, int flags, int tableid)
 	char *next;
 	struct rt_msghdr *rtm;
 	struct rtdump *rtdump;
+	struct sockaddr *sa;
 
 	if (tableid < 0 || tableid > RT_TABLEID_MAX) {
 		printf("%% conf_routes: tableid %d out of range\n", tableid);
 		return(1);
 	}
 	rtdump = getrtdump(0, flags, tableid);
-	if (rtdump == NULL)
+	if (rtdump == NULL) {
+		printf("%% conf_routes: getrtdump failure\n");
 		return(1);
+	}
 
 	/* walk through routing table */
 	for (next = rtdump->buf; next < rtdump->lim; next += rtm->rtm_msglen) {
 		rtm = (struct rt_msghdr *)next;
-		if ((rtm->rtm_flags & flags) == 0)
+		if (rtm->rtm_version != RTM_VERSION)
+			continue;
+		sa = (struct sockaddr *)(next + rtm->rtm_hdrlen);
+		if (af != AF_UNSPEC && sa->sa_family != af)
 			continue;
 		if (!rtm->rtm_errno) {
 			if (rtm->rtm_addrs)
@@ -1207,11 +1226,11 @@ conf_print_rtm(FILE *output, struct rt_msghdr *rtm, char *delim, int af)
 	for (i = 1; i; i <<= 1)
 		if (i & rtm->rtm_addrs) {
 			sa = (struct sockaddr *)cp;
+
 			switch (i) {
 			case RTA_DST:
 				/* allow arp to get printed with af==AF_LINK */
-				if ((sa->sa_family == af) ||
-				    (af == AF_LINK && sa->sa_family == AF_INET)) {
+				if (sa->sa_family == af) {
 					if (rtm->rtm_flags & RTF_REJECT)
 						snprintf(flags, sizeof(flags),
 						    " reject");
