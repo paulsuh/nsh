@@ -280,14 +280,12 @@ Menu ip6tab[] = {
 	{ "maxifprefixes", "Max if IPv6 Prefixes",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxifdefrouters", "Max if IPv6 Def Routers",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxdynroutes", "Max IPv6 Dyn Routes",	CMPL0 0, 0, 0, 0, ipsysctl },
-	{ "accept-rtadv", "Accept Router Advertisements", CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
 	{ 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 Menu mplstab[] = {
 	{ "ttl",	"MPLS ttl",			CMPL0 0, 0, 0, 1, ipsysctl },
-	{ "ifq-maxlen", "MPLS IFQ maxlen",		CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "mapttl-ip",	"MPLS mapttl IPv4",		CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "mapttl-ip6",	"MPLS mapttl IPv6",		CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
