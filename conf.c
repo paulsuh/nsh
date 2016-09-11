@@ -51,6 +51,7 @@
 			 * text representation
 			 */
 #define TMPSIZ 1024	/* size of temp strings */
+#define ROUTEMTU 32768	/* common route MTU */
 #define MTU_IGNORE ULONG_MAX	/* ignore this "default" mtu */
 
 void conf_db_single(FILE *, char *, char *, char *);
@@ -58,8 +59,10 @@ void conf_interfaces(FILE *, char *);
 void conf_print_rtm(FILE *, struct rt_msghdr *, char *, int);
 int conf_ifaddrs(FILE *, char *, int, int);
 int conf_ifaddr_dhcp(FILE *, char *, int);
-void conf_ifflags(FILE *, int, int);
-void conf_vlan(FILE *, int, char *);
+void conf_ifflags(FILE *, int, char *, int);
+void conf_vnetid(FILE *, int, char *);
+void conf_parent(FILE *, int, char *);
+void conf_patch(FILE *, int, char *);
 void conf_brcfg(FILE *, int, struct if_nameindex *, char *);
 void conf_ifxflags(FILE *, int, char *);
 void conf_rtables(FILE *);
@@ -67,11 +70,13 @@ void conf_rtables_rtable(FILE *, int);
 void conf_rdomain(FILE *, int, char *);
 void conf_ifmetrics(FILE *, int, struct if_data, char *);
 void conf_pflow(FILE *, int, char *);
+void conf_mpw(FILE *, int, char *);
 void conf_ctl(FILE *, char *, char *, int);
 void conf_intrtlabel(FILE *, int, char *);
 void conf_intgroup(FILE *, int, char *);
 void conf_keepalive(FILE *, int, char *);
 void conf_groupattrib(FILE *);
+void conf_rtflags(char *, int, struct rt_msghdr *rtm);
 int dhclient_isenabled(char *);
 int islateif(char *);
 int isdefaultroute(struct sockaddr *, struct sockaddr *);
@@ -89,6 +94,7 @@ static const struct {
 	{ "enc",	1536 },
 	{ "pflow",	MTU_IGNORE },
 	{ "pflog",	MTU_IGNORE },
+	{ "pfsync",	MTU_IGNORE },
 	{ "lo",		MTU_IGNORE },
 };
 
@@ -143,6 +149,7 @@ conf(FILE *output)
 	fprintf(output, "!\n");
 	conf_ctl(output, "", "dns", 0);
 	conf_ctl(output, "", "rtadv", 0);
+        conf_ctl(output, "", "motd", 0);
 
 	/*
 	 * start all intefaces not listed in 'latestartifs'
@@ -525,10 +532,11 @@ void conf_interfaces(FILE *output, char *only)
 
 		if ((lladdr = get_hwdaddr(ifnp->if_name)) != NULL)
 			conf_db_single(output, "lladdr", lladdr, ifnp->if_name);
-		conf_db_single(output, "rtsol", NULL, ifnp->if_name);
 		conf_db_single(output, "rtadvd", NULL, ifnp->if_name);
 
-		conf_vlan(output, ifs, ifnp->if_name);
+		conf_vnetid(output, ifs, ifnp->if_name);
+		conf_parent(output, ifs, ifnp->if_name);
+		conf_patch(output, ifs, ifnp->if_name);
 		conf_rdomain(output, ifs, ifnp->if_name);
 		conf_intrtlabel(output, ifs, ifnp->if_name);
 		conf_intgroup(output, ifs, ifnp->if_name);
@@ -547,6 +555,7 @@ void conf_interfaces(FILE *output, char *only)
 			conf_pfsync(output, ifs, ifnp->if_name);
 			conf_trunk(output, ifs, ifnp->if_name);
 			conf_pflow(output, ifs, ifnp->if_name);
+			conf_mpw(output, ifs, ifnp->if_name);
 			conf_ifxflags(output, ifs, ifnp->if_name);
 			if (timeslot_status(ifs, ifnp->if_name, tmp,
 			    sizeof(tmp)) == 1) 
@@ -557,7 +566,7 @@ void conf_interfaces(FILE *output, char *only)
 			conf_sppp(output, ifs, ifnp->if_name);
 			conf_pppoe(output, ifs, ifnp->if_name);
 		}
-		conf_ifflags(output, flags, ippntd);
+		conf_ifflags(output, flags, ifnp->if_name, ippntd);
 	}
 	close(ifs);
 	if_freenameindex(ifn_list);
@@ -587,7 +596,49 @@ int conf_ifaddr_dhcp(FILE *output, char *ifname, int flags)
 	return ippntd;
 }
 
-void conf_vlan(FILE *output, int ifs, char *ifname)
+void conf_vnetid(FILE *output, int ifs, char *ifname)
+{
+	int vnetid;
+
+	if (((vnetid = get_vnetid(ifs, ifname)) != 0))
+		fprintf(output, " vnetid %i\n", vnetid);
+}
+
+void conf_patch(FILE *output, int ifs, char *ifname)
+{
+	struct ifreq ifr;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+
+#ifdef SIOCGIFPAIR	/* 6.0+ */
+	if (ioctl(ifs, SIOCGIFPAIR, &ifr) == 0 && ifr.ifr_index != 0 &&
+	    if_indextoname(ifr.ifr_index, ifname) != NULL)
+		fprintf(output, " patch %s\n", ifname);
+#endif
+}
+
+#ifdef SIOCGIFPARENT	/* 6.0+ */
+void conf_parent(FILE *output, int ifs, char *ifname)
+{
+	struct if_parent ifp;
+
+	memset(&ifp, 0, sizeof(ifp));
+	strlcpy(ifp.ifp_name, ifname, IFNAMSIZ);
+
+	if (ioctl(ifs, SIOCGIFPARENT, (caddr_t)&ifp) == -1) {
+		if (errno != EADDRNOTAVAIL && errno != ENOTTY)
+			printf("%% SIOCGIFPARENT %s: %s\n", ifname,
+			    strerror(errno));
+		return;
+	}
+
+	fprintf(output, " parent %s\n", ifp.ifp_parent);
+}
+
+#else
+
+void conf_parent(FILE *output, int ifs, char *ifname)
 {
 	struct ifreq ifr;
 	struct vlanreq vreq;
@@ -611,8 +662,9 @@ void conf_vlan(FILE *output, int ifs, char *ifname)
 	}
 }
 
+#endif
 
-void conf_ifflags(FILE *output, int flags, int ippntd)
+void conf_ifflags(FILE *output, int flags, char *ifname, int ippntd)
 {
 	if (flags & IFF_DEBUG)
 		fprintf(output, " debug\n");
@@ -628,15 +680,20 @@ void conf_ifflags(FILE *output, int flags, int ippntd)
 	}
 	if (flags & IFF_NOARP)
 		fprintf(output, " no arp\n");
-	/*
-	 * ip X/Y turns the interface up (just like 'no shutdown')
-	 * ...but if we never had an ip address set and the interface
-	 * is up, we need to save this state explicitly.
-	 */
-	if (!ippntd && (flags & IFF_UP))
+
+	if (isprefix("pppoe", ifname)) {		/* XXX */
 		fprintf(output, " no shutdown\n");
-	else if (!(flags & IFF_UP))
-		fprintf(output, " shutdown\n");
+	} else {
+		/*
+		 * ip X/Y turns the interface up (just like 'no shutdown')
+		 * ...but if we never had an ip address set and the interface
+		 * is up, we need to save this state explicitly.
+		 */
+		if (!ippntd && (flags & IFF_UP))
+			fprintf(output, " no shutdown\n");
+		else if (!(flags & IFF_UP))
+			fprintf(output, " shutdown\n");
+	}
 	fprintf(output, "!\n");
 }
 
@@ -687,18 +744,10 @@ void conf_ifxflags(FILE *output, int ifs, char *ifname)
  		/* set mpls mode for eth interfaces */
 		if (ifr.ifr_flags & IFXF_MPLS)
 			fprintf(output, " mpls\n");
-#ifdef IFXF_NOINET6		/* Pre 5.7 */
-		if (ifr.ifr_flags & IFXF_NOINET6)
-			fprintf(output, " no inet6\n");
-#endif
-#ifdef IFXF_INET6_PRIVACY
-		if (ifr.ifr_flags & IFXF_INET6_PRIVACY)
-			fprintf(output, " autoconfprivacy\n");
-#endif
-#ifdef IFXF_INET6_NOPRIVACY
+		if (ifr.ifr_flags & IFXF_AUTOCONF6)
+			fprintf(output, " autoconf6\n");
 		if (ifr.ifr_flags & IFXF_INET6_NOPRIVACY)
 			fprintf(output, " no autoconfprivacy\n");
-#endif
 		if (ifr.ifr_flags & IFXF_WOL)
 			fprintf(output, " wol\n");
 	}
@@ -709,7 +758,7 @@ void conf_ifxflags(FILE *output, int ifs, char *ifname)
 	/* set label for mpe */
 	if (ioctl(ifs, SIOCGETLABEL , (caddr_t)&ifr) != -1)
 		if (shim.shim_label > 0)
-			fprintf(output, " label %d\n", shim.shim_label);
+			fprintf(output, " mpelabel %d\n", shim.shim_label);
 }
 
 void conf_rdomain(FILE *output, int ifs, char *ifname)
@@ -733,7 +782,6 @@ int get_rdomain(int ifs, char *ifname)
 	return -1;
 }
 
-
 void conf_keepalive(FILE *output, int ifs, char *ifname)
 {
 	struct ifkalivereq ikar;
@@ -746,12 +794,50 @@ void conf_keepalive(FILE *output, int ifs, char *ifname)
 		fprintf(output, " keepalive %d %d\n",
 		    ikar.ikar_timeo, ikar.ikar_cnt);
 }
-	
+
+void conf_mpw(FILE *output, int ifs, char *ifname)
+{
+	struct sockaddr_in *sin;
+	struct ifmpwreq imr;
+	struct ifreq ifr;
+
+	bzero(&imr, sizeof(imr));
+	bzero(&ifr, sizeof(ifr));
+
+	strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ifr.ifr_data = (caddr_t) &imr;
+	if (ioctl(ifs, SIOCGETMPWCFG, (caddr_t) &ifr) == -1)
+		return;
+
+	switch (imr.imr_type) {
+	case IMR_TYPE_NONE:
+		break;
+	case IMR_TYPE_ETHERNET:
+		fprintf(output, " encap ethernet\n");
+		break;
+	case IMR_TYPE_ETHERNET_TAGGED:
+		fprintf(output, " encap ethernet-tagged\n");
+		break;
+	default:
+		printf("%% conf_mpw: imr.imr_type %d unknown\n", imr.imr_type);
+		break;
+	}
+
+	if (imr.imr_flags & IMR_FLAG_CONTROLWORD)
+		fprintf(output, " controlword\n");
+
+	if (imr.imr_lshim.shim_label != 0 || imr.imr_rshim.shim_label != 0)
+		fprintf(output, " mpwlabel %u %u\n", imr.imr_lshim.shim_label,
+		    imr.imr_rshim.shim_label);
+
+	sin = (struct sockaddr_in *) &imr.imr_nexthop;
+	if (!(sin->sin_addr.s_addr == 0))
+		fprintf(output, " neighbor %s\n", inet_ntoa(sin->sin_addr));
+}
 
 void conf_ifmetrics(FILE *output, int ifs, struct if_data if_data,
     char *ifname)
 {
-	int vnetid;
 	int dstport;
 	char tmpa[IPSIZ], tmpb[IPSIZ], tmpc[TMPSIZ];
 	struct ifreq ifrpriority;
@@ -766,25 +852,18 @@ void conf_ifmetrics(FILE *output, int ifs, struct if_data if_data,
 		fprintf(output, " tunnel %s %s", tmpa, tmpb);
 		if (dstport > 0)
 			fprintf(output, ":%i", dstport);
-		if (((physrt = conf_physrtable(ifs, ifname)) != 0))
+		if (((physrt = get_physrtable(ifs, ifname)) != 0))
 			fprintf(output, " rdomain %i", physrt);
-		if (((physttl = conf_physttl(ifs, ifname)) != 0))
+		if (((physttl = get_physttl(ifs, ifname)) != 0))
 			fprintf(output, " ttl %i", physttl);
 		fprintf(output, "\n");
 	}
 
-	if (((vnetid = conf_vnetid(ifs, ifname)) != 0))
-			fprintf(output, " vnetid %i\n", vnetid);
-
 	/*
 	 * print interface mtu, metric
-	 *
-	 * ignore interfaces named "pfsync" since their mtu
-	 * is dynamic and controlled by the kernel
 	 */
-	if (!MIN_ARG(ifname, "pfsync") &&
-	    (if_data.ifi_mtu != default_mtu(ifname) &&
-	    default_mtu(ifname) != MTU_IGNORE) && if_data.ifi_mtu != 0)
+	if (if_data.ifi_mtu != default_mtu(ifname) &&
+	   default_mtu(ifname) != MTU_IGNORE && if_data.ifi_mtu != 0)
 		fprintf(output, " mtu %u\n", if_data.ifi_mtu);
 	if (if_data.ifi_metric)
 		fprintf(output, " metric %u\n", if_data.ifi_metric);
@@ -931,20 +1010,23 @@ int conf_ifaddrs(FILE *output, char *ifname, int flags, int af)
 				sindest = (struct sockaddr_in *)ifa->ifa_dstaddr;
 				fprintf(output, " ip %s",
 				    routename4(sin->sin_addr.s_addr));
-				fprintf(output, " %s", inet_ntoa(sindest->sin_addr));
+				if (ntohl(sindest->sin_addr.s_addr) !=
+				    INADDR_ANY)
+					fprintf(output, " %s",
+					    inet_ntoa(sindest->sin_addr));
 			} else if (flags & IFF_BROADCAST) {
 				sindest = (struct sockaddr_in *)ifa->ifa_broadaddr;
 				fprintf(output, " ip %s",
 				    netname4(sin->sin_addr.s_addr, sinmask));
 				/*
-				 * no reason to save the broadcast addr
-				 * if it is standard (this should always 
-				 * be true unless someone has messed up their
-				 * network or they are playing around...)
+				 * don't save a broadcast address that would be
+				 * automatically calculated by the kernel anyways
 				 */
 				if (ntohl(sindest->sin_addr.s_addr) !=
 				    in4_brdaddr(sin->sin_addr.s_addr,
-				    sinmask->sin_addr.s_addr))
+				    sinmask->sin_addr.s_addr) &&
+				    ntohl(sindest->sin_addr.s_addr) !=
+				    INADDR_ANY)
 					fprintf(output, " %s",
 					    inet_ntoa(sindest->sin_addr));
 			} else {
@@ -1095,7 +1177,7 @@ conf_groupattrib(FILE *output)
 		    errno != ENOTTY) {
 			printf("%% conf_groupattrib: SIOCGIFGROUP/1: %s\n",
 				    strerror(errno));
-			return;
+			goto fail;
 		}
 
 		len = ifgr.ifgr_len;
@@ -1105,12 +1187,13 @@ conf_groupattrib(FILE *output)
 		if (ifgr.ifgr_groups == NULL) {
 			printf("%% conf_groupattrib: calloc: %s\n",
 			    strerror(errno));
-			return;
+			goto fail;
 		}
 		if (ioctl(ifs, SIOCGIFGROUP, (caddr_t)&ifgr) == -1) {
 			printf("%% conf_groupattrib: SIOCGIFGROUP/2: %s\n",
 			    strerror(errno));
 			free(ifgr.ifgr_groups);
+			goto fail;
 		}
 		ifg = ifgr.ifgr_groups;
 		for (; ifg && len >= sizeof(struct ifg_req); ifg++) {
@@ -1129,6 +1212,7 @@ conf_groupattrib(FILE *output)
 		}
 		free(ifgr.ifgr_groups);
 	}
+fail:
 	if_freenameindex(ifn_list);
 }
 
@@ -1223,11 +1307,55 @@ isdefaultroute(struct sockaddr *sa, struct sockaddr *samask)
 	return 0;
 }
 
+static const struct {
+	char *name;
+	long flag;
+} rtflags[] = {
+	{ "blackhole",	RTF_BLACKHOLE },
+	{ "cloning",	RTF_CLONING },
+	{ "iface",	-RTF_GATEWAY },
+	{ "llinfo",	RTF_LLINFO },
+	{ "nompath",	-RTF_MPATH },
+	{ "nostatic",	-RTF_STATIC },
+	{ "proto1",	RTF_PROTO1 },
+	{ "proto2",	RTF_PROTO2 },
+	{ "reject",	RTF_REJECT }
+};
+
+void
+conf_rtflags(char *txt, int flags, struct rt_msghdr *rtm)
+{
+	int i;
+
+	for (i = 0; i < nitems(rtflags); i++)
+		if (rtflags[i].flag < 0) {
+			if (!flags & rtflags[i].flag) {
+				strlcat(txt, " ", TMPSIZ);
+				strlcat(txt, rtflags[i].name, TMPSIZ);
+			}
+		} else if (flags & rtflags[i].flag) {
+				strlcat(txt, " ", TMPSIZ);
+				strlcat(txt, rtflags[i].name, TMPSIZ);
+		}
+
+	if (rtm->rtm_rmx.rmx_mtu && rtm->rtm_rmx.rmx_mtu != ROUTEMTU) {
+		char sn1[16];
+		snprintf(sn1, sizeof(sn1), " mtu %d", rtm->rtm_rmx.rmx_mtu);
+		strlcat(txt, sn1, TMPSIZ);
+	}
+	if (rtm->rtm_rmx.rmx_expire) {
+		char sn1[16];
+		snprintf(sn1, sizeof(sn1), " expire %lld",
+		    rtm->rtm_rmx.rmx_expire);
+		strlcat(txt, sn1, TMPSIZ);
+	}
+}
+
 void
 conf_print_rtm(FILE *output, struct rt_msghdr *rtm, char *delim, int af)
 {
 	int i;
-	char *cp, flags[64];
+	char *cp, flags[TMPSIZ];
 	struct sockaddr *dst = NULL, *gate = NULL, *mask = NULL;
 	struct sockaddr *sa;
 	struct sockaddr_in sin;
@@ -1241,13 +1369,10 @@ conf_print_rtm(FILE *output, struct rt_msghdr *rtm, char *delim, int af)
 
 			switch (i) {
 			case RTA_DST:
-				/* allow arp to get printed with af==AF_LINK */
+				/* allow arp to print when af==AF_LINK */
 				if (sa->sa_family == af) {
-					if (rtm->rtm_flags & RTF_REJECT)
-						snprintf(flags, sizeof(flags),
-						    " reject");
-					else
-						flags[0] = '\0';
+					conf_rtflags(flags, rtm->rtm_flags,
+					    rtm);
 					dst = sa;
 				}
 				break;
@@ -1277,4 +1402,5 @@ conf_print_rtm(FILE *output, struct rt_msghdr *rtm, char *delim, int af)
 		fprintf(output, "%s%s ", delim, routename(dst));
 		fprintf(output, "%s\n", routename(gate));
 	}
+	memset(flags, 0, TMPSIZ);
 }

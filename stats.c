@@ -86,10 +86,8 @@ typedef int bool;
 struct  mbstat mbstat;
 struct kinfo_pool mbpool, mclpool;
 
-#ifdef INET6
 char	*inet6name(struct in6_addr *);
 void	inet6print(struct in6_addr *, int, char *, int);
-#endif
 
 /*
  * Dump TCP statistics structure.
@@ -782,6 +780,8 @@ mbpr(void)
 	size_t size;
 	int page_size = getpagesize();
 	int nmbtypes = sizeof(mbstat.m_mtypes) / sizeof(short);
+
+	memset(&seen, 0, sizeof(seen));
 
 	if (nmbtypes != 256) {
 		printf("%% mbpr: unexpected change to mbstat; check source\n");

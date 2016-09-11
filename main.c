@@ -38,7 +38,7 @@ char *vers = "1.0";
 int bridge = 0;		/* bridge mode for interface() */
 int verbose = 0;	/* verbose mode */
 int priv = 0, cli_rtable = 0;
-int editing;
+int editing = 1;
 pid_t pid;
 
 History *histi = NULL;
@@ -101,10 +101,12 @@ main(int argc, char *argv[])
 		printf("%% database ipv6linklocal creation failed\n");
 	if (db_create_table_flag_x("lladdr") < 0)
 		printf("%% database lladdr creation failed\n");
-	if (db_create_table_flag_x("rtsol") < 0)
-		printf("%% database rtsol creation failed\n");
 	if (db_create_table_flag_x("rtadvd") < 0)
 		printf("%% database rtadvd creation failed\n");
+	if (db_create_table_flag_x("authkey") < 0)
+		printf("%% database authkey creation failed\n");
+	if (db_create_table_flag_x("peerkey") < 0)
+		printf("%% database peerkey creation failed\n");
 
 	if (iflag) {
 		/*

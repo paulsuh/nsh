@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <sys/param.h>
 #include <sys/sockio.h>
@@ -52,6 +53,10 @@ void pack_ifaliasreq(struct ifaliasreq *, ip_t *, struct in_addr *, char *);
 void pack_in6aliasreq(struct in6_aliasreq *, ip_t *, struct in6_addr *, char *);
 void ipv6ll_db_store(struct sockaddr_in6 *, struct sockaddr_in6 *, int, char *);
 void printifhwfeatures(int, char *);
+void show_vnet_parent(int, char *);
+
+static struct ifmpwreq imrsave;
+static char imrif[IFNAMSIZ];
 
 static const struct {
 	char *name;
@@ -63,14 +68,12 @@ static const struct {
 	{ "pflow Accounting Data",	IFT_PFLOW },
 	{ "IPsec Encapsulation",	IFT_ENC },      
 	{ "Generic Tunnel",		IFT_GIF },
-	{ "IPv6-IPv4 TCP relay",	IFT_FAITH },
-	{ "Ethernet Bridge",		IFT_BRIDGE },
 	{ "Common Address Redundancy Protocol",	IFT_CARP },
+	{ "Bluetooth",			IFT_BLUETOOTH },
 	/* IANA-assigned types */
-	{ "ATM Logical",		IFT_ATMLOGICAL },
-	{ "ATM Virtual",		IFT_ATMVIRTUAL },
-	{ "ATM",			IFT_ATM },
 	{ "Ethernet",			IFT_ETHER },
+	{ "USB",			IFT_USB },
+	{ "Transparent bridge",		IFT_BRIDGE },
 	{ "HDLC",			IFT_HDLC },
 	{ "IEEE 802.1Q",		IFT_L2VLAN },
 	{ "Virtual",			IFT_PROPVIRTUAL },
@@ -79,15 +82,19 @@ static const struct {
 	{ "IEEE 802.3ad Link Aggregate", IFT_IEEE8023ADLAG },
 	{ "PPP",			IFT_PPP },
 	{ "Loopback",			IFT_LOOP },
-	{ "ISDN BRI",			IFT_ISDNBASIC },
-	{ "ISDN PRI",			IFT_ISDNPRIMARY },
-	{ "V.35",			IFT_V35 },
-	{ "HSSI",			IFT_HSSI },
 	{ "Network Tunnel",		IFT_TUNNEL },
 	{ "Coffee Pot",			IFT_COFFEE },
 	{ "IEEE 802.11",		IFT_IEEE80211 },
 	{ "Unspecified",		IFT_OTHER },
 };
+
+void imr_init(char *ifname)
+{
+	if (strcmp(ifname, imrif) == 0)
+			return;
+	strlcpy (imrif, ifname, IFNAMSIZ);
+	memset (&imrsave, 0, sizeof(imrsave));
+}
 
 int
 show_int(int argc, char **argv)
@@ -99,7 +106,6 @@ show_int(int argc, char **argv)
 	struct sockaddr_in *sin = NULL, *sinmask = NULL, *sindest;
 	struct sockaddr_in6 *sin6 = NULL, *sin6mask = NULL, *sin6dest;
 	struct timeval tv;
-	struct vlanreq vreq;
 
 	short tmp;
 	int ifs, br, flags, days, hours, mins, pntd;
@@ -161,7 +167,8 @@ show_int(int argc, char **argv)
 	memset(&ifrdesc, 0, sizeof(ifrdesc));
 	strlcpy(ifrdesc.ifr_name, ifname, sizeof(ifrdesc.ifr_name));
 	ifrdesc.ifr_data = (caddr_t)&ifdescr;
-	if (ioctl(ifs, SIOCGIFDESCR, &ifrdesc) == 0 && strlen(ifrdesc.ifr_data))
+	if (ioctl(ifs, SIOCGIFDESCR, &ifrdesc) == 0 &&
+	    strlen(ifrdesc.ifr_data))
 		printf(" (%s)", ifrdesc.ifr_data);
 
 	putchar('\n');
@@ -177,6 +184,7 @@ show_int(int argc, char **argv)
 		hours = c / (60 * 60);
 		c %= (60 * 60);
 		mins = c / 60;
+		c %= 60;
 		printf(" (last change ");
 		if (days)
 			printf("%id ", days);
@@ -239,21 +247,25 @@ show_int(int argc, char **argv)
 			continue;
 		}
 		
-		if (!ippntd)
+		if (!ippntd) 
 			printf("  Internet address");
 
-		printf("%s %s", ippntd ? "," : "", ifa->ifa_addr->sa_family == AF_INET ?
-		    netname4(sin->sin_addr.s_addr, sinmask) : netname6(sin6, sin6mask));
+		printf("%s %s", ippntd ? "," : "", ifa->ifa_addr->sa_family
+		    == AF_INET ? netname4(sin->sin_addr.s_addr, sinmask) :
+		    netname6(sin6, sin6mask));
 
 		ippntd = 1;
 
 		switch (ifa->ifa_addr->sa_family) {
 		case AF_INET:
 			if (flags & IFF_POINTOPOINT) {
-				sindest = (struct sockaddr_in *)ifa->ifa_dstaddr;
-				printf(" (Destination %s)", routename4(sindest->sin_addr.s_addr));
+				sindest = (struct sockaddr_in *)
+				    ifa->ifa_dstaddr;
+				printf(" (Destination %s)",
+				    routename4(sindest->sin_addr.s_addr));
 			} else if (flags & IFF_BROADCAST) {
-				sindest = (struct sockaddr_in *)ifa->ifa_broadaddr;
+				sindest = (struct sockaddr_in *)
+				    ifa->ifa_broadaddr;
 				/*
 				 * no reason to show the broadcast addr
 				 * if it is standard (this should always
@@ -262,16 +274,20 @@ show_int(int argc, char **argv)
 				 */
 				if (ntohl(sindest->sin_addr.s_addr) !=
 				    in4_brdaddr(sin->sin_addr.s_addr,
-				    sinmask->sin_addr.s_addr))
+				    sinmask->sin_addr.s_addr) &&
+				    ntohl(sindest->sin_addr.s_addr) !=
+				    INADDR_ANY)
 					printf(" (Broadcast %s)",
 					    inet_ntoa(sindest->sin_addr));
 			}
 			break;
 		case AF_INET6:
 			if (flags & IFF_POINTOPOINT) {
-				sin6dest = (struct sockaddr_in6 *)ifa->ifa_dstaddr;
+				sin6dest = (struct sockaddr_in6 *)
+				    ifa->ifa_dstaddr;
 				in6_fillscopeid(sin6dest);
-				printf(" (Destination %s)", routename6(sin6dest));
+				printf(" (Destination %s)",
+				    routename6(sin6dest));
 			}
 			break;
 		default:
@@ -281,7 +297,6 @@ show_int(int argc, char **argv)
 	}
 
 	if (ippntd) {
-		ippntd = 0;
 		printf("\n");
 	}
 	freeifaddrs(ifap);
@@ -291,44 +306,35 @@ show_int(int argc, char **argv)
 		    sizeof(tmp_str), sizeof(tmp_str2)) > 0) {
 			printf("  Tunnel source %s destination %s",
 			    tmp_str, tmp_str2);
-			if (((physrt = conf_physrtable(ifs, ifname)) != 0))
+			if (((physrt = get_physrtable(ifs, ifname)) != 0))
 				printf(" destination rdomain %i", physrt);
-			if (((physttl = conf_physttl(ifs, ifname)) != 0))
+			if (((physttl = get_physttl(ifs, ifname)) != 0))
 				printf(" ttl %i", physttl);
 			printf("\n");
 		}
 		carp_state(ifs, ifname);
 
 		printf(" ");
+		show_vnet_parent(ifs, ifname);
 		if (ioctl(ifs, SIOCGIFRDOMAIN, (caddr_t)&ifr) != -1)
-			printf(" Routing Domain %d,", ifr.ifr_rdomainid);
+			printf(" rdomain %d,", ifr.ifr_rdomainid);
+
 		/*
 		 * Display MTU, line rate
 		 */
 		printf(" MTU %u bytes", if_data.ifi_mtu);
-#ifdef SIOCGIFHARDMTU
 		if (ioctl(ifs, SIOCGIFHARDMTU, (caddr_t)&ifr) != -1) {
 			if (ifr.ifr_hardmtu)
 				printf(" (hardmtu %u)", ifr.ifr_hardmtu);
 		}
-#endif
 		if (if_data.ifi_baudrate)
-			printf(", Line Rate %qu %s\n",
+			printf(", Line Rate %qu %s",
 			    MBPS(if_data.ifi_baudrate) ?
 			    MBPS(if_data.ifi_baudrate) :
 			    if_data.ifi_baudrate / 1000,
 			    MBPS(if_data.ifi_baudrate) ? "Mbps" : "Kbps");
-		else
-			printf("\n");
- 
-		memset(&vreq, 0, sizeof(struct vlanreq));
-		ifr.ifr_data = (caddr_t)&vreq;
 
-		if (ioctl(ifs, SIOCGETVLAN, (caddr_t)&ifr) != -1)
-			if(vreq.vlr_tag || (vreq.vlr_parent[0] != '\0'))
-				printf("  802.1Q vlan tag %d, parent %s\n",
-				    vreq.vlr_tag, vreq.vlr_parent[0] == '\0' ?
-				    "<none>" : vreq.vlr_parent);
+		printf("\n");
 	}
 
 	if (get_nwinfo(ifname, tmp_str, sizeof(tmp_str), NWID) != 0) {
@@ -404,6 +410,25 @@ show_int(int argc, char **argv)
 
 	close(ifs);
 	return(0);
+}
+
+void
+show_vnet_parent(int ifs, char *ifname)
+{
+#ifdef SIOCGIFPARENT	/* 6.0+ */
+	struct if_parent ifp;
+#endif
+	struct ifreq ifr;
+
+	bzero(&ifr, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+
+	if (ioctl(ifs, SIOCGVNETID, (caddr_t)&ifr) != -1)
+		printf(" vnetid %d,", ifr.ifr_vnetid);
+#ifdef SIOCGIFPARENT	/* 6.0+ */
+	if (ioctl(ifs, SIOCGIFPARENT, (caddr_t)&ifp) != -1)
+		printf(" parent %s,", ifp.ifp_parent);
+#endif
 }
 
 /* lifted right from ifconfig.c */
@@ -611,7 +636,8 @@ get_ifxflags(char *ifname, int ifs)
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 
 	if (ioctl(ifs, SIOCGIFXFLAGS, (caddr_t)&ifr) < 0) {
-		printf("%% get_ifxflags: SIOCGIFXFLAGS: %s\n", strerror(errno));
+		printf("%% get_ifxflags: SIOCGIFXFLAGS: %s\n",
+		    strerror(errno));
 		flags = 0;
 	} else
 		flags = ifr.ifr_flags;
@@ -628,7 +654,8 @@ set_ifxflags(char *ifname, int ifs, int flags)
 	ifr.ifr_flags = flags;
 
 	if (ioctl(ifs, SIOCSIFXFLAGS, (caddr_t)&ifr) < 0) {
-		printf("%% set_ifxflags: SIOCSIFXFLAGS: %s\n", strerror(errno));
+		printf("%% set_ifxflags: SIOCSIFXFLAGS: %s\n",
+		    strerror(errno));
 	}
 
 	return(0);
@@ -638,14 +665,6 @@ set_ifxflags(char *ifname, int ifs, int flags)
 int
 addaf(char *ifname, int af, int ifs)
 {
-#ifdef IFXF_NOINET6	/* Pre 5.7 */
-	if (af == AF_INET6) {
-		set_ifxflags(ifname, ifs, -IFXF_NOINET6);
-	} else {
-		printf("%% addaf not implemented for AF %d\n", af);
-		return(1);
-	}
-#else			/* 5.7 */
 	struct if_afreq	ifar;
 
 	strlcpy(ifar.ifar_name, ifname, sizeof(ifar.ifar_name));
@@ -655,22 +674,12 @@ addaf(char *ifname, int af, int ifs)
 		    strerror(errno));
 		return(1);
 	}
-#endif
 	return(0);
 }
 
 int
 removeaf(char *ifname, int af, int ifs)
 {
-#ifdef IFXF_NOINET6	/* Pre 5.7 */
-	if (af == AF_INET6) {
-		set_ifxflags(ifname, ifs, IFXF_NOINET6);
-		set_ifxflags(ifname, ifs, -IFXF_AUTOCONF6);
-	} else {
-		printf("%% removeaf not implemented for AF %d\n", af);
-		return(1);
-	}
-#else			/* 5.7 */
 	struct if_afreq	ifar;
 
 	strlcpy(ifar.ifar_name, ifname, sizeof(ifar.ifar_name));
@@ -680,7 +689,6 @@ removeaf(char *ifname, int af, int ifs)
 		    strerror(errno));
 		return(1);
 	}
-#endif
 	return(0);
 }
 
@@ -953,8 +961,10 @@ intpflow(char *ifname, int ifs, int argc, char **argv)
 	    (argc == 4 || argc == 6) && (!isprefix(argv[0], "sender") ||
 	    !isprefix(argv[2], "receiver") ||
 	    (argc == 6 && !isprefix(argv[4], "version"))))) {
-		printf("%% pflow sender <x.x.x.x> receiver <x.x.x.x:port> [version 5|9|10]\n");
-		printf("%% no pflow [sender x.x.x.x receiver x.x.x.x:port version 5|9|10]\n");
+		printf("%% pflow sender <x.x.x.x> receiver <x.x.x.x:port> "
+		    "[version 5|9|10]\n"
+		    "%% no pflow [sender x.x.x.x receiver x.x.x.x:port "
+		    "version 5|9|10]\n");
 		return(0);
 	}
 
@@ -976,19 +986,65 @@ intpflow(char *ifname, int ifs, int argc, char **argv)
 		pflow_addr(argv[1], &preq.flowsrc);
 		pflow_addr(argv[3], &preq.flowdst);
 		if (argc == 6) {
-			preq.version = strtonum(argv[5], 5, PFLOW_PROTO_MAX, &errmsg);
+			preq.version = strtonum(argv[5], 5, PFLOW_PROTO_MAX,
+			    &errmsg);
 			preq.addrmask |= PFLOW_MASK_VERSION;
 	                if (errmsg) {
-				printf("%% Invalid pflow version %s: %s\n", argv[0], errmsg);
+				printf("%% Invalid pflow version %s: %s\n",
+				    argv[0], errmsg);
 				return(0);
 			}
                 }
 	}
 
 	if (ioctl(ifs, SIOCSETPFLOW, (caddr_t)&ifr) == -1)
-		printf("%% Unable to set pflow parameters: %s\n", strerror(errno));
+		printf("%% Unable to set pflow parameters: %s\n",
+		    strerror(errno));
 
 	return(0);
+}
+
+int
+intpatch(char *ifname, int ifs, int argc, char **argv)
+{
+	int set;
+	struct ifreq ifr;
+
+	if (NO_ARG(argv[0])) {
+		set = 0;
+		argc--;
+		argv++;
+	} else
+		set = 1;
+
+	argc--;
+	argv++;
+
+	if ((set && argc != 1) || (!set && argc > 1)) {
+		printf("%% patch <pair interface>\n");
+		printf("%% no patch [pair interface]\n");
+		return 0;
+	}
+
+	bzero(&ifr, sizeof(ifr));
+
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+	if (set) {
+		if ((ifr.ifr_index = if_nametoindex(argv[0])) == 0) {
+			printf("%% invalid interface %s\n", argv[0]);
+			return 0;
+		}
+	} else {
+		ifr.ifr_index = 0;
+	}
+#ifdef SIOCSIFPAIR /* 6.0+ */
+	if (ioctl(ifs, SIOCSIFPAIR, &ifr) == -1)
+		printf("%% intpatch: SIOCSIFPAIR: %s\n", strerror(errno));
+#else
+	printf("%% Unsupported OpenBSD version\n");
+#endif
+
+	return 0;
 }
 
 int
@@ -1071,16 +1127,17 @@ intkeepalive(char *ifname, int ifs, int argc, char **argv)
 	strlcpy(ikar.ikar_name, ifname, sizeof(ikar.ikar_name));
 	if (ioctl(ifs, SIOCSETKALIVE, (caddr_t)&ikar) < 0) {
 		if (errno == ENOTTY)
-			printf("%% Keepalive not available on this interface\n");
+			printf("%% Keepalive not available on %s\n", ifname);
 		else
-			printf("%% intkeepalive: SIOCSETKALIVE: %s\n", strerror(errno));
+			printf("%% intkeepalive: SIOCSETKALIVE: %s\n",
+			    strerror(errno));
 	}
 
 	return(0);
 }
 
 int
-intlabel(char *ifname, int ifs, int argc, char **argv)
+intmpelabel(char *ifname, int ifs, int argc, char **argv)
 {
 	struct ifreq ifr;
 	struct shim_hdr shim;
@@ -1107,9 +1164,11 @@ intlabel(char *ifname, int ifs, int argc, char **argv)
 	ifr.ifr_data = (caddr_t)&shim;
 
 	if (set) {
-		shim.shim_label = strtonum(argv[0], 0, MPLS_LABEL_MAX, &errmsg);
+		shim.shim_label = strtonum(argv[0], 0, MPLS_LABEL_MAX,
+		    &errmsg);
 		if (errmsg) {
-			printf("%% Invalid MPLS Label %s: %s\n", argv[0], errmsg);
+			printf("%% Invalid MPLS Label %s: %s\n", argv[0],
+			    errmsg);
 			return(0);
 		}
 	} else
@@ -1118,11 +1177,180 @@ intlabel(char *ifname, int ifs, int argc, char **argv)
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 	if (ioctl(ifs, SIOCSETLABEL, (caddr_t)&ifr) < 0) {
 		if (errno == ENOTTY)
-			printf("%% MPLS label not supported on this device (mpe only)\n");
+			printf("%% MPLS label not supported on %s\n", ifname);
 		else
-			printf("%% intlabel: SIOCSETLABEL: %s\n", strerror(errno));
+			printf("%% intlabel: SIOCSETLABEL: %s\n",
+			    strerror(errno));
 	}
 	return(0);
+}
+
+#define MPWLABEL 1
+#define MPWNEIGHBOR 2
+#define MPWCONTROLWORD 3
+#define MPWENCAP 4
+
+static struct mpwc {
+	char *name;
+	char *descr;
+	char *descr2;
+	int type;
+	int args;
+} mpwcs[] = {
+	{ "mpwlabel",	"local label",	"remote label",	MPWLABEL,	2 },
+	{ "neighbor",	"neighbor IP",	"",		MPWNEIGHBOR,	1 },
+	{ "controlword", "controlword",	"",		MPWCONTROLWORD,	0 },
+	{ "encap",	"encap-type",	"",		MPWENCAP,	1 },
+	{ 0,		0,		0,		0,		0 }
+};
+
+/* from ifconfig.c */
+int
+intmpw(char *ifname, int ifs, int argc, char **argv)
+{
+	int set;
+	struct sockaddr_in *sin, *sinn;
+	struct ifmpwreq imr;
+	struct ifreq ifr;
+	struct mpwc *x;
+	const char *errstr;
+
+	bzero(&imr, sizeof(imr));
+	bzero(&ifr, sizeof(ifr));
+
+	strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+
+	if (NO_ARG(argv[0])) {
+		set = 0;
+		argc--;
+		argv++;
+	} else
+		set = 1;
+
+	x=(struct mpwc *) genget(argv[0], (char **)mpwcs, sizeof(struct mpwc));
+	if (x == 0) {
+		printf("%% Internal error - Invalid argument %s\n", argv[0]);
+		return 0;
+	} else if (Ambiguous(x)) {
+		printf("%% Internal error - Ambiguous argument %s\n", argv[0]);
+		return 0;
+	}
+
+	argc--;
+	argv++;
+
+	if (x->args == 2 && ((!set && argc > 2) || (set && argc != 2))) {
+		printf("%% %s <%s> <%s>\n", x->name, x->descr, x->descr2);
+		printf("%% no %s [%s] [%s]\n", x->name, x->descr, x->descr2);
+		return(0);
+	}
+	if (x->args == 1 && ((!set && argc > 1) || (set && argc != 1))) {
+		printf("%% %s <%s>\n", x->name, x->descr);
+		printf("%% no %s [%s]\n", x->name, x->descr);
+		return(0);
+	}
+	if (!x->args && argc) {
+		printf("%% %s\n", x->name);
+		printf("%% no %s\n", x->name);
+		return(0);
+	}
+
+	switch(x->type) {
+	case MPWLABEL:
+		if (!set) {
+			imrsave.imr_lshim.shim_label = 0;
+			imrsave.imr_rshim.shim_label = 0;
+			break;
+		}
+		imrsave.imr_lshim.shim_label = strtonum(argv[0],
+		    (MPLS_LABEL_RESERVED_MAX + 1), MPLS_LABEL_MAX, &errstr);
+		if (errstr != NULL) {
+			printf("%% invalid local label: %s\n", errstr);
+			return 0;
+		}
+
+		imrsave.imr_rshim.shim_label = strtonum(argv[1],
+		    (MPLS_LABEL_RESERVED_MAX + 1), MPLS_LABEL_MAX, &errstr);
+		if (errstr != NULL) {
+			printf("%% invalid remote label: %s\n", errstr);
+			return 0;
+		}
+	break;
+	case MPWNEIGHBOR:
+		sin = (struct sockaddr_in *) &imrsave.imr_nexthop;
+		if (set && inet_aton(argv[0], &sin->sin_addr) == 0) {
+			printf("%% invalid neighbor addresses\n");
+			return 0;
+		}
+		if (!set) {
+			sin->sin_addr.s_addr = 0;
+		}
+		sin->sin_family = AF_INET;
+	break;
+	case MPWCONTROLWORD:
+		if (set)
+			imrsave.imr_flags |= IMR_FLAG_CONTROLWORD;
+		else
+			imrsave.imr_flags &= ~IMR_FLAG_CONTROLWORD;
+	break;
+	case MPWENCAP:
+		if (!set) {
+			imrsave.imr_type = UINT32_MAX;
+			break;
+		}
+		if (isprefix(argv[0], "ethernet")) {
+			imrsave.imr_type = IMR_TYPE_ETHERNET;
+		} else if (isprefix(argv[0], "ethernet-tagged")) {
+			imrsave.imr_type = IMR_TYPE_ETHERNET_TAGGED;
+		} else {
+			printf("%% invalid mpw encapsulation type\n");
+			return 0;
+		}
+		break;
+	}
+
+	ifr.ifr_data = (caddr_t) &imr;
+	if (ioctl(ifs, SIOCGETMPWCFG, (caddr_t) &ifr) == -1) {
+		printf("%% SIOCGETMPWCFG: %s\n", strerror(errno));
+		return 0;
+	}
+
+	if (imrsave.imr_type == 0)
+		imrsave.imr_type = imr.imr_type;
+	if (imrsave.imr_type == UINT32_MAX)
+		imrsave.imr_type = 0;
+
+	if (x->type != MPWCONTROLWORD)
+		imrsave.imr_flags |= imr.imr_flags;
+
+	if (imrsave.imr_lshim.shim_label == 0 ||
+	    imrsave.imr_rshim.shim_label == 0) {
+		if (imr.imr_lshim.shim_label == 0 ||
+		    imr.imr_rshim.shim_label == 0) {
+			/* mpw local / remote label not specified */
+			return 0;
+		}
+		imrsave.imr_lshim.shim_label = imr.imr_lshim.shim_label;
+		imrsave.imr_rshim.shim_label = imr.imr_rshim.shim_label;
+	}
+
+	sin = (struct sockaddr_in *) &imrsave.imr_nexthop;
+	sinn = (struct sockaddr_in *) &imr.imr_nexthop;
+	if (sin->sin_addr.s_addr == 0) {
+		if (sinn->sin_addr.s_addr == 0) {
+			/* mpw neighbor address not specified */
+			return 0;
+		}
+
+		sin->sin_family = sinn->sin_family;
+		sin->sin_addr.s_addr = sinn->sin_addr.s_addr;
+	}
+
+	ifr.ifr_data = (caddr_t) &imrsave;
+	if (ioctl(ifs, SIOCSETMPWCFG, (caddr_t) &ifr) == -1)
+		printf("%% intmpw: SIOCSETMPWCFG: %s\n", strerror(errno));
+
+	return 0;
 }
 
 int
@@ -1162,24 +1390,29 @@ intdhcrelay(char *ifname, int ifs, int argc, char **argv)
 		char server[24], argue[SIZE_CONF_TEMP];
 		char *killcmd[] = { PKILL, "-xf", NULL, '\0' };
 
-		if ((alen = conf_dhcrelay(ifname, server, sizeof(server))) < 1) {
+		if ((alen = conf_dhcrelay(ifname, server, sizeof(server))) < 1)
+		{
 			if (alen == 0)
-				printf("%% No relay configured for %s\n", ifname);
+				printf("%% No relay configured for %s\n",
+				    ifname);
 			else
-				printf("%% int_dhcrelay: conf_dhcrelay failed: %d\n", alen);
+				printf("%% int_dhcrelay: conf_dhcrelay failed:"
+				    " %d\n", alen);
 			return(0);
 		}
 
-		/* if dhcrelay not relaying to specified dhcp server, bail out */
+		/* bail if dhcrelay not relaying to specified dhcp server */
 		if (argc && strcmp(server, argv[0]) != 0) {
-			printf("%% Server expected: %s (not %s)\n", server, argv[0]);
+			printf("%% Server expected: %s (not %s)\n", server,
+			    argv[0]);
 			return(0);
 		}
 
 		flag_x("dhcrelay", ifname, DB_X_REMOVE, NULL);
 
 		/* setup argument list as one argument for pkill -xf */
-		snprintf(argue, sizeof(argue), "%s %s %s %s", cmd[0], cmd[1], cmd[2], server);
+		snprintf(argue, sizeof(argue), "%s %s %s %s", cmd[0], cmd[1],
+		    cmd[2], server);
 		killcmd[3] = argue;
 
 		cmdargs(PKILL, killcmd);
@@ -1230,7 +1463,8 @@ intmetric(char *ifname, int ifs, int argc, char **argv)
 
 		num = strtonum(argv[0], 0, max, &errmsg);
 		if (errmsg) {
-			printf("%% Invalid %s %s: %s\n", type, argv[0], errmsg);
+			printf("%% Invalid %s %s: %s\n", type, argv[0],
+			    errmsg);
 			return(0);
 		}
 		ifr.ifr_metric = num;
@@ -1245,7 +1479,8 @@ intmetric(char *ifname, int ifs, int argc, char **argv)
 
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 	if (ioctl(ifs, theioctl, (caddr_t)&ifr) < 0)
-		printf("%% intmetric: SIOCSIF%s: %s\n", type, strerror(errno));
+		printf("%% intmetric: SIOCSIF%s: %s\n", type,
+		    strerror(errno));
 
 	return(0);
 }
@@ -1253,9 +1488,11 @@ intmetric(char *ifname, int ifs, int argc, char **argv)
 int
 intvlan(char *ifname, int ifs, int argc, char **argv)
 {
+#ifndef SIOCSIFPARENT /* 5.9- */
 	const char *errmsg = NULL;
 	struct ifreq ifr;
 	struct vlanreq vreq;
+#endif
 	int set;
 
 	if (NO_ARG(argv[0])) {
@@ -1275,6 +1512,7 @@ intvlan(char *ifname, int ifs, int argc, char **argv)
 		return 0;
 	}
 
+#ifndef SIOCSIFPARENT /* 5.9- */
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
 
 	bzero(&vreq, sizeof(vreq));
@@ -1293,14 +1531,15 @@ intvlan(char *ifname, int ifs, int argc, char **argv)
 		}
 		return(0);
 	}
-
+#endif
 	if (set) {
 		if (!is_valid_ifname(argv[2]) || is_bridge(ifs, argv[2])) {
 			printf("%% Invalid vlan parent %s\n", argv[2]);
 			return 0;
 		}
+#ifndef SIOCSIFPARENT	/* 5.9- */
 		strlcpy(vreq.vlr_parent, argv[2], sizeof(vreq.vlr_parent));
-		vreq.vlr_tag = strtonum(argv[0], 0, 4096, &errmsg);
+		vreq.vlr_tag = strtonum(argv[0], 0, 4095, &errmsg);
 		if (errmsg) {
 			printf("%% Invalid vlan tag %s: %s", argv[0], errmsg);
 			return 0;
@@ -1312,8 +1551,25 @@ intvlan(char *ifname, int ifs, int argc, char **argv)
 	} else {
 		bzero(&vreq.vlr_parent, sizeof(vreq.vlr_parent));
 		vreq.vlr_tag = 0;
+#endif
 	}
 
+#ifdef SIOCSIFPARENT	/* 6.0+ */
+	if (set) {
+		char *vnet_argv[] = { "vnetid", argv[0], '\0' };
+		char *par_argv[] = { "parent", argv[2], '\0' };
+
+		intparent(ifname, ifs, 2, par_argv);
+		intvnetid(ifname, ifs, 2, vnet_argv);
+	} else {
+		char *vnet_argv[] = { "no", "vnetid" };
+		char *par_argv[] = { "no", "parent" };
+
+		intparent(ifname, ifs, 2, par_argv);
+		intvnetid(ifname, ifs, 2, vnet_argv);
+	}
+
+#else
 	if (ioctl(ifs, SIOCSETVLAN, (caddr_t)&ifr) == -1) {
 		switch(errno) {
 		case EBUSY:
@@ -1327,6 +1583,7 @@ intvlan(char *ifname, int ifs, int argc, char **argv)
 			return 0;
 		}
 	}
+#endif
 
 	return 0;
 }
@@ -1335,9 +1592,7 @@ int
 intgroup(char *ifname, int ifs, int argc, char **argv)
 {
 	int set, i;
-	char *ioc;
 	struct ifgroupreq ifgr;
-	unsigned long ioctype;
 
 	if (NO_ARG(argv[0])) {
 		set = 0;
@@ -1367,26 +1622,19 @@ intgroup(char *ifname, int ifs, int argc, char **argv)
 		}
 	}
 
-	if (set) {
-		ioctype=SIOCAIFGROUP;
-		ioc="SIOCAIFGROUP";
-	} else {
-		ioctype=SIOCDIFGROUP;
-		ioc="SIOCDIFGROUP";
-	}
-
 	for (i = 0; i < argc; i++) {
 		bzero(&ifgr, sizeof(ifgr));
 		strlcpy(ifgr.ifgr_name, ifname, IFNAMSIZ);
 		strlcpy(ifgr.ifgr_group, argv[i], IFNAMSIZ);
 
-		if (ioctl(ifs, ioctype, (caddr_t)&ifgr) == -1) {
+		if (ioctl(ifs, set ? SIOCAIFGROUP : SIOCDIFGROUP,
+		    (caddr_t)&ifgr) == -1) {
 			switch(errno) {
 			case EEXIST:
 				break;
 			default:
-				printf("%% intgroup: %s: %s\n", ioc,
-				    strerror(errno));
+				printf("%% intgroup: SIOC%sIFGROUP: %s\n",
+				    set ? "S" : "D", strerror(errno));
 				break;
 			}
 		}
@@ -1431,6 +1679,47 @@ intrtlabel(char *ifname, int ifs, int argc, char **argv)
 
 	return 0;
 }
+
+#ifdef SIOCSIFPARENT
+int
+intparent(char *ifname, int ifs, int argc, char **argv)
+{
+	int set;
+	struct if_parent ifp;
+
+	if (NO_ARG(argv[0])) {
+		set = 0;
+		argc--;
+		argv++;
+	} else
+		set = 1;
+
+	argc--;
+	argv++;
+
+	if ((set && argc != 1) || (!set && argc > 1)) {
+                printf("%% parent <parent interface>\n");
+                printf("%% no parent [parent interface]\n");
+                return 0;
+        }
+
+	bzero(&ifp, sizeof(ifp));
+
+	strlcpy(ifp.ifp_name, ifname, IFNAMSIZ);
+
+	if (set && strlcpy(ifp.ifp_parent, argv[0], sizeof(ifp.ifp_parent)) >=
+	    sizeof(ifp.ifp_parent)) {
+		printf("%% parent name too long\n");
+		return 0;
+	}
+
+	if (ioctl(ifs, set ? SIOCSIFPARENT : SIOCDIFPARENT, &ifp) == -1)
+		printf("%% intparent: SIOC%sIFPARENT: %s\n", set ? "S" : "D",
+		    strerror(errno));
+
+	return 0;
+}
+#endif
 
 int
 intflags(char *ifname, int ifs, int argc, char **argv)
@@ -1525,12 +1814,9 @@ intxflags(char *ifname, int ifs, int argc, char **argv)
 		set = 1;
 
 	if (isprefix(argv[0], "autoconfprivacy")) {
-#ifdef IFXF_INET6_PRIVACY
-		value = IFXF_INET6_PRIVACY;
-#endif
-#ifdef IFXF_INET6_NOPRIVACY
 		value = -IFXF_INET6_NOPRIVACY;
-#endif
+	} else if (isprefix(argv[0], "autoconf6")) {
+		value = IFXF_AUTOCONF6;
 	} else if (isprefix(argv[0], "mpls")) {
 		value = IFXF_MPLS;
 	} else if (isprefix(argv[0], "wol")) {
@@ -1699,7 +1985,8 @@ intpowersave(char *ifname, int ifs, int argc, char **argv)
 	if (argc == 1)
 		power.i_maxsleep = strtonum(argv[0], 0, 1000, &errmsg);
 		if (errmsg) {
-			printf("%% Power save invalid %s: %s", argv[0], errmsg);
+			printf("%% Power save invalid %s: %s", argv[0],
+			    errmsg);
 			return(0);
 		}
 	else
@@ -1783,13 +2070,14 @@ intlladdr(char *ifname, int ifs, int argc, char **argv)
 		addr = ether_aton(set ? argv[1] : llorig);
 		if (addr == NULL) {
 			if (set) {
-				printf("%% MAC addresses must be six hexadecimal "
-				    "fields, up to two digits each,\n");
-				printf("%% separated with colons (1:23:45:ab:cd:ef)\n");
+				printf("%% MAC addresses are six hexadecimal "
+				    "fields, up to two digits each,\n"
+				    " %% separated with colons"
+				    " (1:23:45:ab:cd:ef)\n");
 				return(1);
 			} else {
-				printf("%% database corrupted, unable to retrieve original "
-				    "lladdr\n");
+				printf("%% database corrupted, unable to "
+				    " retrieve original lladdr\n");
 				return(1);
 			}
 		} 
@@ -1828,11 +2116,7 @@ intrtd(char *ifname, int ifs, int argc, char **argv)
 	} else
 		set = 1;
 
-	if (isprefix(argv[0], "rtsol")) {
-		/* XXX this has been replaced with IFXF_AUTOCONF6 */
-		cmdname = "rtsol";
-		cmdpath = RTSOL;
-	} else if (isprefix(argv[0], "rtadvd")) {
+	if (isprefix(argv[0], "rtadvd")) {
 		cmdname = "rtadvd";
 		cmdpath = RTADVD;
 	} else {
@@ -1860,12 +2144,9 @@ intrtd(char *ifname, int ifs, int argc, char **argv)
 		} else {
 			printf("%% %s already running\n", cmdname);
 		}
-		if (!set && strcmp(cmdname, "rtsol") == 0) {
-			char *args[] = { PKILL, cmdpath, ifname, '\0' };
-
-			cmdargs(PKILL, args);
-		} else if (!set && strcmp(cmdname, "rtadvd") == 0) {
-			char *args[] = { PKILL, cmdpath, "-c", "/var/run/rtadvd.0", ifname, '\0' };
+		if (!set && strcmp(cmdname, "rtadvd") == 0) {
+			char *args[] = { PKILL, cmdpath, "-c",
+			    "/var/run/rtadvd.0", ifname, '\0' };
 
 			cmdargs(PKILL, args);
 		}
@@ -1881,12 +2162,9 @@ intrtd(char *ifname, int ifs, int argc, char **argv)
 		} else {
 			printf("%% %s not running\n", cmdname);
 		}
-		if (set && strcmp(cmdname, "rtsol") == 0) {
-			char *args[] = { cmdpath, ifname, '\0' };
-
-			cmdargs(cmdpath, args);
-		} else if (set && strcmp(cmdname, "rtadvd") == 0) {
-			char *args[] = { cmdpath, "-c", "/var/run/rtadvd.0", ifname, '\0' };
+		if (set && strcmp(cmdname, "rtadvd") == 0) {
+			char *args[] = { cmdpath, "-c", "/var/run/rtadvd.0",
+			    ifname, '\0' };
 
 			cmdargs(cmdpath, args);
 		}

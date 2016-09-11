@@ -30,6 +30,7 @@
 /* service daemons */
 #define OSPFD		"/usr/sbin/ospfd"
 #define OSPF6D		"/usr/sbin/ospf6d"
+#define EIGRPD		"/usr/sbin/eigrpd"
 #define BGPD		"/usr/sbin/bgpd"
 #define RIPD		"/usr/sbin/ripd"
 #define ISAKMPD		"/sbin/isakmpd"
@@ -71,11 +72,12 @@ struct daemons ctl_daemons[] = {
 { "pf",		"PF",	ctl_pf,		PFCONF_TEMP,	0600, 1, 0 },
 { "ospf",	"OSPF",	ctl_ospf,	OSPFCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "ospf6",	"OSPF6",ctl_ospf6,	OSPF6CONF_TEMP,	0600, 0, RT_TABLEID_MAX },
+{ "eigrp",	"EIGRP",ctl_eigrp,	EIGRPCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "bgp",	"BGP",	ctl_bgp,	BGPCONF_TEMP,	0600, 0, 0 },
 { "rip",	"RIP",	ctl_rip,	RIPCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "ldp",	"LDP",	ctl_ldp,	LDPCONF_TEMP,	0600, 0, 0 },
 { "relay",	"Relay",ctl_relay,	RELAYCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
-{ "ipsec",	"IPsec IKEv1",ctl_ipsec,IPSECCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
+{ "ipsec",	"IPsec IKEv1",ctl_ipsec,IPSECCONF_TEMP,	0600, 1, RT_TABLEID_MAX },
 { "ike",	"IPsec IKEv2",ctl_ike,	IKECONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "rtadv",	"rtadvd",ctl_rtadv,	RTADVCONF_TEMP,	0600, 0, 0 },
 { "dvmrp",	"DVMRP",ctl_dvmrp,	DVMRPCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
@@ -94,10 +96,18 @@ struct daemons ctl_daemons[] = {
 { "smtp",	"SMTP",	ctl_smtp,	SMTPCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "ldap",	"LDAP",	ctl_ldap,	LDAPCONF_TEMP,	0600, 0, RT_TABLEID_MAX },
 { "ifstate",	"If state",ctl_ifstate,	IFSTATECONF_TEMP,0600, 0, RT_TABLEID_MAX },
+{ "motd",        "MOTD",  ctl_motd,        MOTD_TEMP,0644, 0, 0 },
 { 0, 0, 0, 0, 0, 0 }
 };
 
 /* per-daemon commands, and their C or executable functions */ 
+
+/* MOTD */
+struct ctl ctl_motd[] = {
+        { "edit",           "edit message-of-the-day",
+            { "motd", NULL, NULL }, call_editor, 0, T_HANDLER },
+        { 0, 0, { 0 }, 0, 0, 0 }
+};
 
 /* PF, pfctl */
 char *ctl_pf_test[] = { PFCTL, "-nf", REQTEMP, '\0' };
@@ -152,6 +162,25 @@ struct ctl ctl_ospf6[] = {
 	{ 0, 0, { 0 }, 0, 0, 0 }
 };
 
+/* eigrpd, eigrpctl */
+char *ctl_eigrp_test[] = { EIGRPD, "-nf", REQTEMP, '\0' };
+struct ctl ctl_eigrp[] = {
+	{ "enable",	"enable service",
+	    { EIGRPD, "-f", REQTEMP, NULL }, NULL, DB_X_ENABLE, T_EXEC },
+	{ "disable",	"disable service",
+	    { PKILL, table, "eigrpd", NULL }, NULL, DB_X_DISABLE, T_EXEC },
+	{ "edit",	"edit configuration",
+	    { "eigrp", (char *)ctl_eigrp_test, NULL }, call_editor, 0,
+	    T_HANDLER_FILL1 },
+	{ "reload",	"reload service",
+	    { EIGRPCTL, "reload", NULL }, NULL, 0, T_EXEC },
+	{ "fib",	"fib couple/decouple",
+	    { EIGRPCTL, "fib", REQ, NULL }, NULL, 0, T_EXEC },
+	{ "log",	"log brief/verbose",
+	    { EIGRPCTL, "lob", REQ, NULL }, NULL, 0, T_EXEC },
+	{ 0, 0, { 0 }, 0, 0, 0 }
+};
+
 /* bgpd, bgpctl */
 char *ctl_bgp_test[] = { BGPD, "-nf", REQTEMP, NULL, '\0' };
 struct ctl ctl_bgp[] = {
@@ -202,6 +231,8 @@ struct ctl ctl_ldp[] = {
 	{ "edit",	"edit configuration",
 	   { "ldp", (char *)ctl_ldp_test, NULL }, call_editor, 0,
 	    T_HANDLER_FILL1 },
+	{ "reload",	"reload service",
+	    { LDPCTL, "reload", NULL }, NULL, 0, T_EXEC },
 	{ "fib",	"fib couple/decouple",
 	   { LDPCTL, "fib", REQ, NULL }, NULL, 0, T_EXEC },
 	{ 0, 0, { 0 }, 0, 0, 0 }
@@ -211,9 +242,15 @@ struct ctl ctl_ldp[] = {
 char *ctl_ipsec_test[] = { IPSECCTL, "-nf", REQTEMP, '\0' };
 struct ctl ctl_ipsec[] = {
 	{ "enable",     "enable service",
+<<<<<<< HEAD
 	    { ISAKMPD, "-K", NULL }, NULL, DB_X_ENABLE },
 	{ "disable",    "disable service",                   
 	    { PKILL, table, "isakmpd", NULL }, NULL, DB_X_DISABLE },
+=======
+	    { ISAKMPD, "-Kv", NULL }, NULL, DB_X_ENABLE, T_EXEC },
+	{ "disable",    "disable service",
+	    { PKILL, table, "isakmpd", NULL }, NULL, DB_X_DISABLE, T_EXEC },
+>>>>>>> yellowman/master
 	{ "edit",       "edit configuration",   
 	    { "ipsec", (char *)ctl_ipsec_test, NULL }, call_editor, 0,
 	    T_HANDLER_FILL1 },
@@ -302,6 +339,8 @@ struct ctl ctl_nppp[] = {
 	    { NPPPCTL, "clear", REQ, OPT, OPT, NULL }, NULL, 0, T_EXEC },
 	{ "session", 	"show PPP sessions",
 	    { NPPPCTL, "session", REQ, OPT, OPT, NULL }, NULL, 0, T_EXEC },
+	{ "monitor",	"monitor PPP sessions",
+	    { NPPPCTL, "monitor", REQ, OPT, OPT, NULL }, NULL, 0, T_EXEC },
 	{ "edit",	"edit configuration",
 	    { "nppp", (char *)ctl_nppp_test, NULL }, call_editor, 0,
 	    T_HANDLER_FILL1 },

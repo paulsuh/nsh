@@ -3,7 +3,6 @@
  */
 
 #define NO_ARG(x)	(strcasecmp(x, "no") == 0) /* absolute "no" */
-#define MIN_ARG(x,y)	(strncasecmp(x, y, strlen(y)) == 0) /* mabye arg y */
 
 #define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0])) /* sys/param.h */
 
@@ -128,6 +127,7 @@ extern char metricnames[];
 #define PFCONF_TEMP	"/var/run/pf.conf"
 #define OSPFCONF_TEMP	"/var/run/ospfd.conf"
 #define OSPF6CONF_TEMP	"/var/run/ospf6d.conf"
+#define EIGRPCONF_TEMP	"/var/run/eigrpd.conf"
 #define BGPCONF_TEMP	"/var/run/bgpd.conf"
 #define RIPCONF_TEMP	"/var/run/ripd.conf"
 #define LDPCONF_TEMP	"/var/run/ldpd.conf"
@@ -153,6 +153,8 @@ extern char metricnames[];
 #define SMTPCONF_TEMP 	"/var/run/smtpd.conf"
 #define LDAPCONF_TEMP	"/var/run/ldapd.conf"
 #define IFSTATECONF_TEMP "/var/run/ifstated.conf"
+#define MOTD_TEMP "/var/run/motd"
+
 /* argument list replacement */
 #define OPT     (void *)1
 #define REQ     (void *)2
@@ -165,6 +167,7 @@ void rmtemp(char *);
 #define PFCTL		"/sbin/pfctl"
 #define OSPFCTL		"/usr/sbin/ospfctl"
 #define OSPF6CTL	"/usr/sbin/ospf6ctl"
+#define EIGRPCTL	"/usr/sbin/eigrpctl"
 #define BGPCTL		"/usr/sbin/bgpctl"
 #define RIPCTL		"/usr/sbin/ripctl"
 #define LDPCTL		"/usr/sbin/ldpctl"
@@ -199,6 +202,7 @@ extern struct daemons ctl_daemons[];
 extern struct ctl ctl_pf[];
 extern struct ctl ctl_ospf[];
 extern struct ctl ctl_ospf6[];
+extern struct ctl ctl_eigrp[];
 extern struct ctl ctl_relay[];
 extern struct ctl ctl_bgp[];
 extern struct ctl ctl_rip[];
@@ -221,6 +225,7 @@ extern struct ctl ctl_tftp[];
 extern struct ctl ctl_dns[];
 extern struct ctl ctl_inet[];
 extern struct ctl ctl_ldap[];
+extern struct ctl ctl_motd[];
 void flag_x(char *, char *, int, char *);
 
 /* commands.c */
@@ -236,8 +241,9 @@ void flag_x(char *, char *, int, char *);
 #define SSH		"/usr/bin/ssh"
 #define PKILL		"/usr/bin/pkill"
 #define SAVESCRIPT	"/usr/local/bin/save.sh"
-/* tmp config locations */
-#define DHCPDB          "/var/db/dhcpd.leases"
+#ifndef DHCPLEASES
+#define DHCPLEASES	"/var/db/dhcpd.leases"
+#endif
 void command(void);
 char **step_optreq(char **, char **, int, char **, int);
 int argvtostring(int, char **, char *, int);
@@ -353,7 +359,7 @@ void show_route(char *, int);
 int is_ip_addr(char *);
 #ifdef _IP_T_
 void parse_ip_pfx(char *, int, ip_t *);
-int ip_route(ip_t *, ip_t *, u_short, int, int);
+int ip_route(ip_t *, ip_t *, u_short, int, int, struct rt_metrics, int inits);
 #endif
 #ifdef _NETINET6_IN6_H_
 int parse_ipv6(char *, struct in6_addr *);
@@ -362,7 +368,6 @@ int parse_ipv6(char *, struct in6_addr *);
 /* if.c */
 #define DHCLIENT	"/sbin/dhclient"
 #define DHCRELAY	"/usr/sbin/dhcrelay"
-#define RTSOL		"/sbin/rtsol"
 #define RTADVD		"/usr/sbin/rtadvd"
 #define IFDATA_MTU 1		/* request for if_data.ifi_mtu */
 #define IFDATA_BAUDRATE 2	/* request for if_data.ifi_baudrate */
@@ -370,6 +375,7 @@ int parse_ipv6(char *, struct in6_addr *);
 #define ROUNDMBPS(bps) ((float)bps == ((bps / 1000 / 1000) * 1000 * 1000))
 #define ROUNDKBPS(bps) ((float)bps == ((bps / 1000) * 1000))
 #define ROUNDKBYTES(bytes) ((float)bytes == ((bytes / 1024) * 1024))
+void imr_init(char *);
 int is_valid_ifname(char *);
 int show_int(int, char **);
 int get_rdomain(int, char *);
@@ -383,7 +389,7 @@ u_int32_t in4_brdaddr(u_int32_t, u_int32_t);
 int intip(char *, int, int, char **);
 int intmtu(char *, int, int, char **);
 int intkeepalive(char *, int, int, char **);
-int intlabel(char *, int, int, char **);
+int intmpelabel(char *, int, int, char **);
 int intrdomain(char *, int, int, char **);
 int intdhcrelay(char *, int, int, char **);
 int intmetric(char *, int, int, char **);
@@ -400,6 +406,9 @@ int intpflow(char *, int, int, char **);
 int intlladdr(char *, int, int, char **);
 int intgroup(char *, int, int, char **);
 int intrtlabel(char *, int, int, char **);
+int intparent(char *, int, int, char **);
+int intpatch(char *, int, int, char **);
+int intmpw(char *, int, int, char **);
 int addaf(char *, int, int);
 int removeaf(char *, int, int);
 char *get_hwdaddr(char *);
@@ -434,9 +443,9 @@ int flush_bridgerule(char *, char*);
 /* tunnel.c */
 int inttunnel(char *, int, int, char **);
 int intvnetid(char *, int, int, char **);
-int conf_physrtable(int, char *);
-int conf_physttl(int, char *);
-int conf_vnetid(int, char *);
+int get_physrtable(int, char *);
+int get_physttl(int, char *);
+int get_vnetid(int, char *);
 
 /* media.c */
 #define DEFAULT_MEDIA_TYPE	"autoselect"
@@ -503,10 +512,6 @@ extern struct winsize winsize;
 #endif
 
 /* complete.c */
-#ifdef _HISTEDIT_H_
-unsigned char complt_c(EditLine *, int);
-unsigned char complt_i(EditLine *, int);
-#endif
 #define CMPL(x) __STRING(x),
 #define CMPL0   "",
 void inithist(void);

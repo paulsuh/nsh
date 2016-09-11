@@ -165,9 +165,11 @@ Menu showlist[] = {
 	{ "bgp",	"BGP information",	CMPL(ta) (char **)bgcs, sizeof(struct prot1), 0, 4, pr_prot1 },
 	{ "ospf",	"OSPF information",	CMPL(ta) (char **)oscs, sizeof(struct prot1), 0, 3, pr_prot1 },
 	{ "ospf6",	"OSPF6 information",	CMPL(ta) (char **)os6cs, sizeof(struct prot1), 0, 3, pr_prot1 },
+	{ "eigrp",	"EIGRP information",	CMPL(ta) (char **)eics, sizeof(struct prot1), 0, 3, pr_prot1 },
 	{ "rip",	"RIP information",	CMPL(ta) (char **)rics, sizeof(struct prot1), 0, 3, pr_prot1 },
 	{ "ldp",	"LDP information",	CMPL(ta) (char **)lics, sizeof(struct prot1), 0, 3, pr_prot1 },
 	{ "ike",	"IKE information",	CMPL(ta) (char **)ikcs, sizeof(struct prot1), 0, 3, pr_prot1 },
+	{ "ipsec",	"IPsec information",	CMPL(ta) (char **)iscs, sizeof(struct prot1), 0, 1, pr_prot1 },
 	{ "dvmrp",	"DVMRP information",	CMPL(ta) (char **)dvcs, sizeof(struct prot1), 0, 2, pr_prot1 },
 	{ "relay",	"Relay server",		CMPL(ta) (char **)rlcs, sizeof(struct prot1), 0, 1, pr_prot1 },
 	{ "dhcp",	"DHCP server",		CMPL(ta) (char **)dhcs, sizeof(struct prot1), 0, 1, pr_dhcp },
@@ -261,7 +263,7 @@ Menu iptab[] = {
 	{ "sourceroute", "Process Loose/Strict Source Route Options", CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "encdebug",	"Enable if_enc debugging",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "send-redirects", "Send ICMP redirects",	CMPL0 0, 0, 0, 0, ipsysctl },
-	{ "ifq-maxlen",	"IP IFQ maxlen",		CMPL0 0, 0, 0, 1, ipsysctl },
+	{ "ifq-maxlen",	"IPv4 ifqueue max length",	CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "directed-broadcast", "Allow directed broadcasts", CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "multipath",	"Multipath routing",		CMPL0 0, 0, 0, 0, ipsysctl },
 #ifdef notyet
@@ -280,6 +282,7 @@ Menu ip6tab[] = {
 	{ "maxifprefixes", "Max if IPv6 Prefixes",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxifdefrouters", "Max if IPv6 Def Routers",	CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "maxdynroutes", "Max IPv6 Dyn Routes",	CMPL0 0, 0, 0, 0, ipsysctl },
+	{ "ifq-maxlen",	"IPv6 ifqueue max length",	CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
 	{ 0, 0, 0, 0, 0, 0, 0, 0 }
 };
@@ -293,15 +296,17 @@ Menu mplstab[] = {
 };
 
 Menu ddbtab[] = {
-	{ "panic",	"DDB panic",			CMPL0 0, 0, 0, 1, ipsysctl },
-	{ "console",	"DDB console",			CMPL0 0, 0, 0, 1, ipsysctl },
-	{ "log",	"DDB log",			CMPL0 0, 0, 0, 1, ipsysctl },
+	{ "panic",	"DDB panic",			CMPL0 0, 0, 0, 0, ipsysctl },
+	{ "console",	"DDB console",			CMPL0 0, 0, 0, 0, ipsysctl },
+	{ "log",	"DDB log",			CMPL0 0, 0, 0, 0, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
 	{ 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 Menu pipextab[] = {
-	{ "enable",	"PIPEX enable",			CMPL0 0, 0, 0, 1, ipsysctl },
+	{ "enable",	"PIPEX enable",			CMPL0 0, 0, 0, 0, ipsysctl },
+	{ "inq-maxlen",	"Input queue max length",	CMPL0 0, 0, 0, 1, ipsysctl },
+	{ "outq-maxlength", "Output queue max length",	CMPL0 0, 0, 0, 1, ipsysctl },
 	{ "?",		"Help",				CMPL0 0, 0, 0, 0, sysctlhelp },
 	{ 0, 0, 0, 0, 0, 0, 0, 0 }
 };
@@ -351,7 +356,7 @@ ipcmd(int argc, char **argv)
 	}
 	if (((i->minarg + 2) > argc) || ((i->maxarg + 2) < argc)) {
 		printf("%% Wrong argument%s to '%s %s' command.\n",
-		    argv[0], argc <= 2 ? "" : "s", i->name);
+		    argc <= 2 ? "" : "s", argv[0], i->name);
 		return 0;
 	}
 
@@ -492,7 +497,7 @@ struct intlist Intlist[] = {
 	{ "metric",	"Set routing metric",			CMPL0 0, 0, intmetric },
 	{ "link",	"Set link level options",		CMPL0 0, 0, intlink },
 	{ "arp",	"Set Address Resolution Protocol",	CMPL0 0, 0, intflags },
-	{ "label",	"Set MPLS Label",			CMPL0 0, 0, intlabel },
+	{ "mpelabel",	"Set MPLS MPE Label",			CMPL0 0, 0, intmpelabel },
 	{ "lladdr",	"Set Link Level (MAC) Address",		CMPL0 0, 0, intlladdr },
 	{ "nwid",	"802.11 network ID",			CMPL0 0, 0, intnwid },
 	{ "nwkey",	"802.11 network key",			CMPL0 0, 0, intnwkey },
@@ -504,16 +509,24 @@ struct intlist Intlist[] = {
 	{ "auth",	"PPP authentication",			CMPL0 0, 0, intsppp },
 	{ "peer",	"PPP peer authentication",		CMPL0 0, 0, intsppp },
 	{ "pppoe",	"PPPoE settings",			CMPL0 0, 0, intpppoe },
-#ifdef INET6
 	{ "vltime",	"IPv6 valid lifetime",			CMPL0 0, 0, intvltime },
 	{ "pltime",	"IPv6 preferred lifetime",		CMPL0 0, 0, intpltime },
 	{ "anycast",	"IPv6 anycast address bit",		CMPL0 0, 0, intanycast },
 	{ "tentative",	"IPv6 tentative address bit",		CMPL0 0, 0, inttentative },
 	{ "eui64",	"IPv6 automatic interface index",	CMPL0 0, 0, inteui64 },
-#endif
 	{ "tunnel",	"VXLAN/GIF/GRE Tunnel parameters",	CMPL0 0, 0, inttunnel },
-	{ "vnetid",	"VXLAN VNETID",				CMPL0 0, 0, intvnetid },
+	{ "vnetid",	"Virtual interface network identifier",	CMPL0 0, 0, intvnetid },
+#ifdef SIOCSIFPARENT	/* 6.0+ */
+	{ "parent",	"Parent interface",			CMPL(i) 0, 0, intparent },
+#endif
+#ifdef SIOCSIFPAIR	/* 6.0+ */
+	{ "patch",	"Pair interface",			CMPL(i) 0, 0, intpatch },
+#endif
 	{ "keepalive",	"GRE tunnel keepalive",			CMPL0 0, 0, intkeepalive },
+	{ "mpwlabel",	"MPLS pseudowire local-remote labels",	CMPL0 0, 0, intmpw },
+	{ "neighbor",	"MPLS pseudowire neighbor IP",		CMPL0 0, 0, intmpw },
+	{ "controlword","MPLS pseudowire controlword",		CMPL0 0, 0, intmpw },
+	{ "encap",	"MPLS pseudowire encapsulation",	CMPL0 0, 0, intmpw },
 	{ "syncdev",	"PFsync control message interface",	CMPL(i) 0, 0, intsyncdev },
 	{ "syncpeer",	"PFsync peer address",			CMPL0 0, 0, intsyncpeer },
 	{ "maxupd", 	"PFsync max updates, defer first packet", CMPL0 0, 0, intmaxupd },
@@ -526,16 +539,16 @@ struct intlist Intlist[] = {
 	{ "carppeer",	"CARP peer",				CMPL0 0, 0, intcarp },
 	{ "balancing",	"CARP balancing mode",			CMPL0 0, 0, intcarp },
 	{ "pflow",	"pflow data export",			CMPL0 0, 0, intpflow },
-	{ "vlan",	"802.1Q vlan tag and parent",		CMPL0 0, 0, intvlan },
+	{ "vlan",	"802.1Q vlan tag and parent",		CMPL0 0, 0, intvlan },	/* XXX bkcompat */
 	{ "timeslots",	"TDM timeslots",			CMPL0 0, 0, inttimeslot },
 	{ "debug",	"Driver dependent debugging",		CMPL0 0, 0, intflags },
 	{ "dhcrelay",	"DHCP Relay Agent",			CMPL0 0, 0, intdhcrelay },
 	{ "wol",	"Wake On LAN",				CMPL0 0, 0, intxflags },
 	{ "mpls",	"MPLS",					CMPL0 0, 0, intxflags },
 	{ "inet6",	"IPv6",					CMPL0 0, 0, intaf },
-	{ "rtsol",	"IPv6 router solicitation request",	CMPL0 0, 0, intrtd },
 	{ "rtadvd",	"IPv6 router advertisement service",	CMPL0 0, 0, intrtd },
-	{ "autoconfprivacy", "IPv6 Autoconfigurable address",	CMPL0 0, 0, intxflags },
+	{ "autoconf6",  "IPv6 Autoconfigurable address",	CMPL0 0, 0, intxflags },
+	{ "autoconfprivacy", "Privacy addresses for IPv6 autoconf", CMPL0 0, 0, intxflags },
         { "trunkport",  "Add child interface(s) to trunk",      CMPL0 0, 0, inttrunkport },
         { "trunkproto", "Define trunkproto",                    CMPL0 0, 0, inttrunkproto },
 	{ "shutdown",   "Shutdown interface",			CMPL0 0, 0, intflags },
@@ -664,6 +677,8 @@ interface(int argc, char **argv, char *modhvar)
 		bridge = 0; 
 	}
 
+	imr_init(ifname);
+
 	if (modhvar) {
 		/* direct rcfile -i or -c initialization */
 		char *argp;
@@ -720,7 +735,7 @@ interface(int argc, char **argv, char *modhvar)
 					break;
 			}
 			if (num >= sizeof(line)) {
-			printf("%% Input exceeds permitted length\n");
+				printf("%% Input exceeds permitted length\n");
 				break;
 			}
 			memcpy(line, buf, (size_t)num);
@@ -803,6 +818,7 @@ static char
 	pfhelp[] =	"Packet filter control",
 	ospfhelp[] =	"OSPF control",
 	ospf6help[] = 	"OSPF6 control",
+	eigrphelp[] =	"EIGRP control",
 	bgphelp[] =	"BGP control",
 	riphelp[] =	"RIP control",
 	ldphelp[] =	"LDP control",
@@ -824,6 +840,7 @@ static char
 	tftpproxyhelp[] ="tftp-proxy server control",
 	tftphelp[] =	"TFTP server control",
 	dnshelp[] =	"DNS rule control",
+        motdhelp[] =    "Message of-the-day",
 	inethelp[] =	"Inet super-server control",
 	bridgehelp[] =	"Modify bridge parameters",
 	showhelp[] =	"Show system information",
@@ -880,6 +897,7 @@ Command cmdtab[] = {
 	{ "pf",		pfhelp,		CMPL(t) (char **)ctl_pf, ssctl, ctlhandler,	1, 0, 1 },
 	{ "ospf",	ospfhelp,	CMPL(t) (char **)ctl_ospf, ssctl, ctlhandler,	1, 0, 1 },
 	{ "ospf6",	ospf6help,	CMPL(t) (char **)ctl_ospf6, ssctl, ctlhandler,	1, 0, 1 },
+	{ "eigrp",	eigrphelp,	CMPL(t) (char **)ctl_eigrp, ssctl, ctlhandler,	1, 0, 1 },
 	{ "bgp",	bgphelp,	CMPL(t) (char **)ctl_bgp, ssctl, ctlhandler,	1, 0, 1 },
 	{ "rip",	riphelp,	CMPL(t) (char **)ctl_rip, ssctl, ctlhandler,	1, 0, 1 },
 	{ "ldp",	ldphelp,	CMPL(t) (char **)ctl_ldp, ssctl, ctlhandler,	1, 0, 1 },
@@ -901,6 +919,7 @@ Command cmdtab[] = {
 	{ "tftp-proxy",	tftpproxyhelp,	CMPL(t) (char **)ctl_tftpproxy, ssctl, ctlhandler, 1, 0, 1 },
 	{ "tftp",	tftphelp,	CMPL(t) (char **)ctl_tftp, ssctl, ctlhandler,	1, 0, 1 },
 	{ "dns",	dnshelp,	CMPL(t) (char **)ctl_dns, ssctl, ctlhandler,	1, 0, 1 },
+        { "motd",       motdhelp,       CMPL(t) (char **)ctl_motd, ssctl, ctlhandler,    1, 0, 1 },
 	{ "inet",	inethelp,	CMPL(t) (char **)ctl_inet, ssctl, ctlhandler,	1, 0, 1 },
 	{ "ping",	pinghelp,	CMPL0 0, 0, ping,	0, 0, 0 },
 	{ "ping6",	ping6help,	CMPL0 0, 0, ping6,	0, 0, 0 },
@@ -1009,8 +1028,10 @@ command()
 	Command  *c;
 	u_int num;
 
-	inithist();
-	initedit();
+	if (editing) {
+		inithist();
+		initedit();
+	}
 
 	for (;;) {
 		if (!editing) {
@@ -1768,7 +1789,8 @@ cmdrc(char rcname[FILENAME_MAX])
 		}
 		if (verbose) {
 			printf("%% %4s: %*s%10s (line %u) margv ",
-			    savec->modh ? "mode" : "cmd", z, savec->name,
+			    savec && savec->modh ? "mode" : "cmd", z,
+			    savec && savec->name ? savec->name : "",
 			    c != savec ? "(sub-cmd)" : "", lnum);
 			p_argv(margc, margv);
 			printf("\n");
@@ -1897,7 +1919,7 @@ nreboot(void)
 	printf ("%% Reboot initiated\n");
 	if (reboot (RB_AUTOBOOT) == -1)
 		printf("%% reboot: RB_AUTOBOOT: %s\n", strerror(errno));
-	return(1);
+	return(0);
 }
                
 int
@@ -1906,7 +1928,7 @@ halt(void)
 	printf ("%% Shutdown initiated\n");
 	if (reboot (RB_HALT) == -1)
 		printf("%% reboot: RB_HALT: %s\n", strerror(errno));
-	return(1);
+	return(0);
 }
 
 /*
@@ -2166,7 +2188,7 @@ pr_dhcp(int argc, char **argv)
 {
 	if (argc == 3 && argv[2][0] != '?') {
 		if (isprefix(argv[2], "leases")) {
-			more(DHCPDB);
+			more(DHCPLEASES);
 			return(0);
 		}
 		printf("%% argument %s not recognized\n", argv[2]);
